@@ -25,19 +25,12 @@ CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
   CGKeyCode keyCode =
       (CGKeyCode)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
 
-  // Click coords (global display space)
-  CGPoint location = CGEventGetLocation(event);
-
-  struct Display *display =
-      manuallyGetDisplaysFromPoint(passedInfo->displayInfo, location);
-
-  // Between 0-1, no matter the screen size.
-  CGPoint normalisedClickPoint;
-  if (display != NULL) {
-    normalisedClickPoint.x =
-        (location.x - display->bounds.origin.x) / display->bounds.size.width;
-    normalisedClickPoint.y =
-        (location.y - display->bounds.origin.y) / display->bounds.size.height;
+  if (eventTypeIsLeftMouse(type)) {
+    keyCode = LEFT_MOUSE_KEYCODE;
+  } else if (eventTypeIsRightMouse(type)) {
+    keyCode = RIGHT_MOUSE_KEYCODE;
+  } else if (eventTypeIsOtherMouse(type)) {
+    keyCode = OTHER_MOUSE_KEYCODE;
   }
 
   // Get the process' name.
@@ -45,29 +38,65 @@ CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
   char processName[255];
   int ret = proc_name(pid, processName, sizeof(processName));
 
+  // Click coords (global display space)
+  CGPoint locationGlobal = CGEventGetLocation(event);
+
+  struct Display *display =
+      manuallyGetDisplaysFromPoint(passedInfo->displaysInfo, locationGlobal);
+  if (display == NULL) {
+    printf("Couldn't find display for point x: %f, y: %f\n", locationGlobal.x,
+           locationGlobal.y);
+    return event;
+  }
+
+  // Click coords (local display space)
+  CGPoint locationLocal;
+  locationLocal.x = locationGlobal.x - display->bounds.origin.x;
+  locationLocal.y = locationGlobal.y - display->bounds.origin.y;
+
+  // Click coords, normalised (local display space)
+  CGPoint normalisedClickPoint;
+  normalisedClickPoint.x = locationLocal.x / display->bounds.size.width;
+  normalisedClickPoint.y = locationLocal.y / display->bounds.size.height;
+
   // If it's an input up event, sent the event.
   // If it's anything else, record the time.
   // For reference, see CGEventTypes.h L102.
   if (type == kCGEventLeftMouseUp || type == kCGEventRightMouseUp ||
       type == kCGEventKeyUp || type == kCGEventOtherMouseUp) {
+
+    double dragDistance = 0;
+    if (eventTypeIsMouse(type)) {
+      // Calculate the distance between the click point and the release point,
+      // and round to nearest int
+      dragDistance = round(sqrt(
+          pow(passedInfo->pressed[keyCode].clickPoint.x - locationLocal.x, 2) +
+          pow(passedInfo->pressed[keyCode].clickPoint.y - locationLocal.y, 2)));
+    }
+
     action_event_delegate(&(struct ActionEvent){
-        .timeDown = diffTimespec(&passedInfo->pressed[keyCode]),
+        .timeDown = diffTimespec(passedInfo->pressed[keyCode].pressed),
         .type = type,
         .keyCode = keyCode,
         .normalisedClickPoint = normalisedClickPoint,
+        .dragDistance = dragDistance,
         .isBuiltinDisplay = display->isBuiltin,
         .isMainDisplay = display->isMain,
         .functionStart = start,
-        .processName = *processName,
+        .processName = processName,
     });
   } else {
     /* If you hold a key down, every time t (depending on your keyboard key
      * repetition configuation) macOS (quartz?) will insert a new key down
      * event, which we don't want to track. Luckily, there's a handy flag to
-     * detect this!
-     */
+     * detect this! */
     if (!CGEventGetDoubleValueField(event, kCGKeyboardEventAutorepeat)) {
-      clock_gettime(CLOCK_REALTIME, &passedInfo->pressed[keyCode]);
+      clock_gettime(CLOCK_REALTIME, passedInfo->pressed[keyCode].pressed);
+    }
+
+    // If it's a mouse down event, record the local click point.
+    if (eventTypeIsMouse(type)) {
+      passedInfo->pressed[keyCode].clickPoint = locationLocal;
     }
   }
 
@@ -76,9 +105,9 @@ CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
 
 // Faster than calling CGGetDisplaysWithPoint
 struct Display *_Nullable manuallyGetDisplaysFromPoint(
-    struct DisplayInfo *displayInfo, CGPoint point) {
-  struct Display *d = displayInfo->displays;
-  for (int i = 0; i < displayInfo->displayCount; i++) {
+    struct DisplaysInfo *displaysInfo, CGPoint point) {
+  struct Display *d = displaysInfo->displays;
+  for (int i = 0; i < displaysInfo->displayCount; i++) {
     // Not using CGRectContainsPoint! This is faster.
     if (point.x >= d[i].bounds.origin.x &&
         point.x <= d[i].bounds.origin.x + d[i].bounds.size.width &&
@@ -93,22 +122,22 @@ struct Display *_Nullable manuallyGetDisplaysFromPoint(
 void displayReconfigurationCallback(CGDirectDisplayID display,
                                     CGDisplayChangeSummaryFlags flags,
                                     void *userInfo) {
-  struct DisplayInfo *displayInfo = (struct DisplayInfo *)userInfo;
+  struct DisplaysInfo *displaysInfo = (struct DisplaysInfo *)userInfo;
 
   CGDirectDisplayID displayIds[DISPLAY_ARR_SIZE];
   uint32_t displayCount;
   CGError result =
       CGGetActiveDisplayList(DISPLAY_ARR_SIZE, displayIds, &displayCount);
-  displayInfo->displayCount = displayCount;
+  displaysInfo->displayCount = displayCount;
 
   // Free old memory if it was previously allocated
-  if (displayInfo->displays != NULL) {
-    printf("Freeing old displayInfo->displays memory\n");
-    free(displayInfo->displays);
+  if (displaysInfo->displays != NULL) {
+    printf("Freeing old displaysInfo->displays memory\n");
+    free(displaysInfo->displays);
   }
   // For each display, get the bounds and the name.
-  displayInfo->displays = malloc(displayCount * sizeof(struct Display));
-  if (displayInfo->displays == NULL) {
+  displaysInfo->displays = malloc(displayCount * sizeof(struct Display));
+  if (displaysInfo->displays == NULL) {
     // wtf? What does one say to the imp inside one's computer when the imp
     // doesn't do the imp's job? If one's sole purpose is to be an Quartz Core
     // Graphics Application Service Event Tap imp, and one can not free
@@ -119,11 +148,11 @@ void displayReconfigurationCallback(CGDirectDisplayID display,
     // with you. Are you worse than a gremlin? A critter? I didn't think so.
     // Allocate & free my heap memory, occasionally call into
     // ApplicationServices.h and don't speak unless spoken to again.
-    printf("Failed to malloc displayInfo->displays");
+    printf("Failed to malloc displaysInfo->displays");
     return;
   }
   for (int i = 0; i < displayCount; i++) {
-    displayInfo->displays[i] = (struct Display){
+    displaysInfo->displays[i] = (struct Display){
         .bounds = CGDisplayBounds(displayIds[i]),
         .isMain = CGDisplayIsMain(displayIds[i]),
         .isBuiltin = CGDisplayIsBuiltin(displayIds[i]),
@@ -132,15 +161,21 @@ void displayReconfigurationCallback(CGDirectDisplayID display,
 }
 
 void registerTap(void) {
-  struct timespec pressed[PRESSED_ARR_SIZE];
-  struct DisplayInfo displayInfo = {
+  struct PressedInfo pressed[PRESSED_ARR_SIZE];
+  for (int i = 0; i < PRESSED_ARR_SIZE; i++) {
+    pressed[i] = (struct PressedInfo){
+        .pressed = &(struct timespec){0},
+        .clickPoint = (struct CGPoint){0},
+    };
+  }
+
+  struct DisplaysInfo displaysInfo = {
       .displays = NULL,
       .displayCount = 0,
-
   };
   struct UserInfo userInfo = {
       .pressed = pressed,
-      .displayInfo = &displayInfo,
+      .displaysInfo = &displaysInfo,
   };
 
   CFMachPortRef eventTap;
@@ -157,10 +192,10 @@ void registerTap(void) {
   // eventMask, myCGEventCallback, &pressed);
 
   // Run the callback function to initialise displays array, then register it.
-  displayReconfigurationCallback(0, 0, &displayInfo);
+  displayReconfigurationCallback(0, 0, &displaysInfo);
   CGDisplayRegisterReconfigurationCallback(displayReconfigurationCallback,
-                                           &displayInfo);
-  displayReconfigurationCallback(0, 0, &displayInfo);
+                                           &displaysInfo);
+  displayReconfigurationCallback(0, 0, &displaysInfo);
 
   if (!eventTap) {
     printf("Failed to create event tap\n");
@@ -182,5 +217,27 @@ void registerTap(void) {
   CFRunLoopRun();
 
   CGDisplayRemoveReconfigurationCallback(displayReconfigurationCallback,
-                                         &displayInfo);
+                                         &displaysInfo);
 }
+
+// #region Utils
+
+bool eventTypeIsMouse(CGEventType type) {
+  return type == kCGEventLeftMouseDown || type == kCGEventLeftMouseUp ||
+         type == kCGEventRightMouseDown || type == kCGEventRightMouseUp ||
+         type == kCGEventOtherMouseDown || type == kCGEventOtherMouseUp;
+}
+bool eventTypeIsLeftMouse(CGEventType type) {
+  return type == kCGEventLeftMouseDown || type == kCGEventLeftMouseDragged ||
+         type == kCGEventLeftMouseUp;
+}
+bool eventTypeIsRightMouse(CGEventType type) {
+  return type == kCGEventRightMouseDown || type == kCGEventRightMouseDragged ||
+         type == kCGEventRightMouseUp;
+}
+bool eventTypeIsOtherMouse(CGEventType type) {
+  return type == kCGEventOtherMouseDown || type == kCGEventOtherMouseDragged ||
+         type == kCGEventOtherMouseUp;
+}
+
+// #endregion

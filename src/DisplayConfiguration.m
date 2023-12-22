@@ -1,5 +1,5 @@
-#import <Cocoa/Cocoa.h>
 #import "DisplayConfiguration.h"
+#import <AppKit/AppKit.h>
 
 int WrappedNSApplicationLoad(void) {
     NSLog(@"WrappedNSApplicationLoad called");
