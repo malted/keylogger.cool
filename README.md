@@ -1,9 +1,11 @@
-## An ethical keylogger for science
+## Ethical keylogging
 
-With the rising popularity of end-of-year summaries of how we use services such as Spotify (and this year, Raycast), I thought it would be interesting to see how I use my computer in 2024.
+With the rising popularity of end-of-year summaries à la Spotify wrapped, I thought it would be interesting to do something similar.
+This tool collects very granular data about how you type & click.
+It stores this data in such a way that it can not be replayed by an attacker.
 
-This tool tracks very granular data about how you type.
-Despite what the name suggests, it's completely nonmalicious, and is designed such that it is impossible to replay keystrokes. All data stays on-device.
+I will be running this tool for all of 2024 to get a year in review of my typing habits; you should too!
+(You will not notice a delay in typing; profiling puts the extra delay at around 20μs.)
 
 ### Control flow flowchart
-![Control flow flowchart](assets/flowchart.png)
+<img src="assets/flowchart.png" alt="control flow flowchart" width="60%" />
