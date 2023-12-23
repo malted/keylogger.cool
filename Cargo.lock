@@ -86,7 +86,7 @@ dependencies = [
 
 [[package]]
 name = "keylogger-cool"
-version = "1.0.0"
+version = "0.1.0"
 dependencies = [
  "cc",
  "once_cell",
