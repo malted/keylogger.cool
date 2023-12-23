@@ -4,9 +4,8 @@ use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use rusqlite::Connection;
 mod utils;
-use utils::store_action_event;
+use utils::{DB_PATH, store_action_event};
 
-static DB_PATH: &str = "action_events.db";
 static DB: Lazy<Mutex<Connection>> = Lazy::new(|| Mutex::new(Connection::open(DB_PATH).unwrap()));
 
 #[no_mangle]
