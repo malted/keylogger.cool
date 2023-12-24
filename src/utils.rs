@@ -2,10 +2,10 @@ use crate::ActionEvent;
 use rusqlite::{Connection, Result};
 
 // Debug or releaese
-pub static DB_PATH: &'static str = if cfg!(debug_assertions) {
-	"vol1.db"
+pub static DB_PATH: &str = if cfg!(debug_assertions) {
+    "db.sqlite"
 } else {
-	"$HOME/.klcool/vol1.db"
+    "~/.klcool/db.sqlite"
 };
 
 pub fn store_action_event(
