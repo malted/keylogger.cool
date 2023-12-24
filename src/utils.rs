@@ -1,13 +1,6 @@
 use crate::ActionEvent;
 use rusqlite::{Connection, Result};
 
-// Debug or releaese
-pub static DB_PATH: &str = if cfg!(debug_assertions) {
-    "db.sqlite"
-} else {
-    "~/.klcool/db.sqlite"
-};
-
 pub fn store_action_event(
     db: &once_cell::sync::Lazy<parking_lot::Mutex<Connection>>,
     event: &ActionEvent,

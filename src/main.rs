@@ -4,9 +4,16 @@ use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use rusqlite::Connection;
 mod utils;
-use utils::{DB_PATH, store_action_event};
+use utils::store_action_event;
 
-static DB: Lazy<Mutex<Connection>> = Lazy::new(|| Mutex::new(Connection::open(DB_PATH).unwrap()));
+static DB: Lazy<Mutex<Connection>> = Lazy::new(|| {
+    let db_path = if cfg!(debug_assertions) {
+        "db.sqlite".to_string()
+    } else {
+        format!("{}/.klcool/db.sqlite", std::env::var("HOME").unwrap())
+    };
+    Mutex::new(Connection::open(db_path).expect("Failed to open database."))
+});
 
 #[no_mangle]
 pub unsafe extern "C" fn action_event_delegate(c_struct: *mut ActionEventC) {

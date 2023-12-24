@@ -5,18 +5,18 @@ on:
     branches:
       - main
     tags:
-      - 'v*.*.*'
+      - "v*.*.*"
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   build:
-    runs-on: macos-13-xlarge
+    runs-on: macos-latest
     steps:
-    - uses: actions/checkout@v3
-    - name: Build
-      run: cargo build --verbose
+      - uses: actions/checkout@v3
+      - name: Build
+        run: cargo build --verbose
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -24,18 +24,17 @@ jobs:
     needs: build
     runs-on: macos-13-xlarge
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-    - name: Set Prerelease Flag
-      id: prerelease
-      run: echo "PRERELEASE=$(echo $GITHUB_REF | grep -qE 'refs/tags/v0\.' && echo 'true' || echo 'false')" >> $GITHUB_ENV
+      - name: Set Prerelease Flag
+        id: prerelease
+        run: echo "PRERELEASE=$(echo $GITHUB_REF | grep -qE 'refs/tags/v0\.' && echo 'true' || echo 'false')" >> $GITHUB_ENV
 
-    - name: Build Release
-      run: cargo build --release --verbose
+      - name: Build Release
+        run: cargo build --release --verbose
 
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      with:
-        files: target/release/keylogger-cool
-        prerelease: ${{ env.PRERELEASE }}
-        
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: target/release/keylogger-cool
+          prerelease: ${{ env.PRERELEASE }}
