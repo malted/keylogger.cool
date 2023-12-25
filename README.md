@@ -1,5 +1,7 @@
 ## Ethical keylogging
 
+![GitHub all releases](https://img.shields.io/github/downloads/malted/keylogger.cool/total)
+
 With the rising popularity of end-of-year summaries à la Spotify wrapped, I thought it would be interesting to do something similar.
 This tool collects very granular data about how you type & click.
 It stores this data in such a way that it can not be replayed by an attacker.
