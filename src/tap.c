@@ -1,18 +1,11 @@
 #include "tap.h"
 #include "DisplayConfiguration.h"
 #include <ApplicationServices/ApplicationServices.h>
+#include <Carbon/Carbon.h>
 #include <CoreGraphics/CoreGraphics.h>
 #include <libproc.h>
 #include <stdio.h>
 #include <time.h>
-
-long diffTimespec(struct timespec *start) {
-  struct timespec end;
-  clock_gettime(CLOCK_REALTIME, &end);
-
-  return (end.tv_sec - start->tv_sec) * 1000 +
-         (end.tv_nsec - start->tv_nsec) / 1000000;
-}
 
 CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
                             CGEventRef event, void *userInfo) {
@@ -26,16 +19,23 @@ CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
       (CGKeyCode)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
 
   if (eventTypeIsLeftMouse(type)) {
-    keyCode = LEFT_MOUSE_KEYCODE;
+    keyCode = KEYCODE_MOUSE_LEFT;
   } else if (eventTypeIsRightMouse(type)) {
-    keyCode = RIGHT_MOUSE_KEYCODE;
+    keyCode = KEYCODE_MOUSE_RIGHT;
   } else if (eventTypeIsOtherMouse(type)) {
-    keyCode = OTHER_MOUSE_KEYCODE;
+    keyCode = KEYCODE_MOUSE_OTHER;
   }
+
+  // https://developer.apple.com/documentation/coregraphics/cgeventfield/kcgscrollwheeleventpointdeltaaxis1
+  // https://gist.github.com/svoisen/5215826
+  int scrollDeltaY =
+      CGEventGetIntegerValueField(event, kCGScrollWheelEventPointDeltaAxis1);
+  int scrollDeltaX =
+      CGEventGetIntegerValueField(event, kCGScrollWheelEventPointDeltaAxis2);
 
   // Get the process' name.
   int pid = CGEventGetIntegerValueField(event, kCGEventTargetUnixProcessID);
-  char processName[255];
+  char processName[255] = {0};
   int ret = proc_name(pid, processName, sizeof(processName));
 
   // Click coords (global display space)
@@ -50,52 +50,65 @@ CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
   }
 
   // Click coords (local display space)
-  CGPoint locationLocal;
-  locationLocal.x = locationGlobal.x - display->bounds.origin.x;
-  locationLocal.y = locationGlobal.y - display->bounds.origin.y;
+  CGPoint locationLocal = {0};
+  locationLocal.x = locationGlobal.x - display->bounds_points.origin.x;
+  locationLocal.y = locationGlobal.y - display->bounds_points.origin.y;
 
   // Click coords, normalised (local display space)
-  CGPoint normalisedClickPoint;
-  normalisedClickPoint.x = locationLocal.x / display->bounds.size.width;
-  normalisedClickPoint.y = locationLocal.y / display->bounds.size.height;
+  CGPoint normalisedClickPoint = {0};
+  normalisedClickPoint.x = locationLocal.x / display->bounds_points.size.width;
+  normalisedClickPoint.y = locationLocal.y / display->bounds_points.size.height;
 
   // If it's an input up event, sent the event.
   // If it's anything else, record the time.
   // For reference, see CGEventTypes.h L102.
   if (type == kCGEventLeftMouseUp || type == kCGEventRightMouseUp ||
-      type == kCGEventKeyUp || type == kCGEventOtherMouseUp) {
+      type == kCGEventKeyUp || type == kCGEventOtherMouseUp ||
+      type == kCGEventScrollWheel) {
+    char *keyChar = keyCodeToChar(keyCode);
 
-    double dragDistance = 0;
-    if (eventTypeIsMouse(type)) {
+    double dragDistancePx = 0, dragDistanceMm = 0;
+    if (eventTypeIsMouseClick(type)) {
       // Calculate the distance between the click point and the release point,
       // and round to nearest int
-      dragDistance = round(sqrt(
+      double dragDistancePoints = round(sqrt(
           pow(passedInfo->pressed[keyCode].clickPoint.x - locationLocal.x, 2) +
           pow(passedInfo->pressed[keyCode].clickPoint.y - locationLocal.y, 2)));
+
+      dragDistancePx = pointsToPx(dragDistancePoints, *display);
+      dragDistanceMm = pointsToMm(dragDistancePoints, *display);
     }
 
     action_event_delegate(&(struct ActionEvent){
         .timeDown = diffTimespec(passedInfo->pressed[keyCode].pressed),
         .type = type,
         .keyCode = keyCode,
+        .keyChar = keyChar,
         .normalisedClickPoint = normalisedClickPoint,
-        .dragDistance = dragDistance,
+        .scrollDeltaX = scrollDeltaX,
+        .scrollDeltaY = scrollDeltaY,
+        .dragDistancePx = dragDistancePx,
+        .dragDistanceMm = dragDistanceMm,
         .isBuiltinDisplay = display->isBuiltin,
         .isMainDisplay = display->isMain,
         .functionStart = start,
         .processName = processName,
     });
+
+    free(keyChar);
+    // Scroll
   } else {
     /* If you hold a key down, every time t (depending on your keyboard key
      * repetition configuation) macOS (quartz?) will insert a new key down
      * event, which we don't want to track. Luckily, there's a handy flag to
      * detect this! */
-    if (!CGEventGetDoubleValueField(event, kCGKeyboardEventAutorepeat)) {
+    if (eventTypeIsKeyboard(type) || eventTypeIsMouseClick(type) ||
+        !CGEventGetDoubleValueField(event, kCGKeyboardEventAutorepeat)) {
       clock_gettime(CLOCK_REALTIME, passedInfo->pressed[keyCode].pressed);
     }
 
     // If it's a mouse down event, record the local click point.
-    if (eventTypeIsMouse(type)) {
+    if (eventTypeIsMouseClick(type)) {
       passedInfo->pressed[keyCode].clickPoint = locationLocal;
     }
   }
@@ -109,10 +122,12 @@ struct Display *_Nullable manuallyGetDisplaysFromPoint(
   struct Display *d = displaysInfo->displays;
   for (int i = 0; i < displaysInfo->displayCount; i++) {
     // Not using CGRectContainsPoint! This is faster.
-    if (point.x >= d[i].bounds.origin.x &&
-        point.x <= d[i].bounds.origin.x + d[i].bounds.size.width &&
-        point.y >= d[i].bounds.origin.y &&
-        point.y <= d[i].bounds.origin.y + d[i].bounds.size.height) {
+    if (point.x >= d[i].bounds_points.origin.x &&
+        point.x <=
+            d[i].bounds_points.origin.x + d[i].bounds_points.size.width &&
+        point.y >= d[i].bounds_points.origin.y &&
+        point.y <=
+            d[i].bounds_points.origin.y + d[i].bounds_points.size.height) {
       return &d[i];
     }
   }
@@ -138,22 +153,52 @@ void displayReconfigurationCallback(CGDirectDisplayID display,
   // For each display, get the bounds and the name.
   displaysInfo->displays = malloc(displayCount * sizeof(struct Display));
   if (displaysInfo->displays == NULL) {
-    // wtf? What does one say to the imp inside one's computer when the imp
-    // doesn't do the imp's job? If one's sole purpose is to be an Quartz Core
-    // Graphics Application Service Event Tap imp, and one can not free
-    // allocated memory, what does one become? Superflous? A burden? A mere
-    // waste of clock cycles. An open letter to imps everywhere: know your
-    // worth. It took one failed malloc to break the camel's back last time,
-    // where the camel is me and its back is my back. I replaced the gremlins
-    // with you. Are you worse than a gremlin? A critter? I didn't think so.
-    // Allocate & free my heap memory, occasionally call into
-    // ApplicationServices.h and don't speak unless spoken to again.
+    // You had one job.
     printf("Failed to malloc displaysInfo->displays");
     return;
   }
   for (int i = 0; i < displayCount; i++) {
+    /* Get the actual resolution of the display in physical pixels. This is
+     * useful because many display functions in CoreGraphics return values in
+     * points, which are not necessarily equal to pixels, for example Quartz's
+     * CGDisplayPixelsWide is somewhat of a misnomer, as it returns points, not
+     * pixels. Sure you could claim they are virtual pixels, but it's confusing
+     * regardless (& undocumented!). Native pixels are physical; for example
+     * my 13.6-inch M2 Air has a 2560-by-1664 native resolution, but in points
+     * is 1470-by-960. */
+    CGSize actual_px = {0};
+    CFArrayRef allModes = CGDisplayCopyAllDisplayModes(displayIds[i], NULL);
+    for (CFIndex i = 0; i < CFArrayGetCount(allModes); i++) {
+      // Retrieve mode
+      CGDisplayModeRef mode =
+          (CGDisplayModeRef)CFArrayGetValueAtIndex(allModes, i);
+
+      // Get the I/O Kit flags for this display mode.
+      uint32_t ioFlags = CGDisplayModeGetIOFlags(mode);
+
+      // https://developer.apple.com/documentation/iokit/1505967-anonymous/kdisplaymodenativeflag
+      if (ioFlags & kDisplayModeNativeFlag) {
+        /* In this case CGDisplayModeGetWidth and CGDisplayModeGetHeight would
+         * still yield the correct result even though they are specified to
+         * return points, as the mode with kDisplayModeNativeFlag set has a 1:1
+         * point to pixel mapping. */
+        actual_px.width = CGDisplayModeGetPixelWidth(mode);
+        actual_px.height = CGDisplayModeGetPixelHeight(mode);
+        break;
+      }
+    }
+    CFRelease(allModes);
+
+    // Check if actual_px was set, if not, fall back to points.
+    if (actual_px.width == 0 || actual_px.height == 0) {
+      actual_px.width = CGDisplayPixelsWide(displayIds[i]);
+      actual_px.height = CGDisplayPixelsHigh(displayIds[i]);
+    }
+
     displaysInfo->displays[i] = (struct Display){
-        .bounds = CGDisplayBounds(displayIds[i]),
+        .bounds_points = CGDisplayBounds(displayIds[i]),
+        .size_mm = CGDisplayScreenSize(displayIds[i]),
+        .size_physical_px = actual_px,
         .isMain = CGDisplayIsMain(displayIds[i]),
         .isBuiltin = CGDisplayIsBuiltin(displayIds[i]),
     };
@@ -182,51 +227,65 @@ void registerTap(void) {
   CGEventMask eventMask;
   CFRunLoopSourceRef runLoopSource;
 
+  // TODO: Include kCGEventMouseMoved
   eventMask = ((1 << kCGEventKeyDown) | (1 << kCGEventKeyUp) |
                (1 << kCGEventLeftMouseDown) | (1 << kCGEventRightMouseDown) |
-               (1 << kCGEventLeftMouseUp) | (1 << kCGEventRightMouseUp));
+               (1 << kCGEventLeftMouseUp) | (1 << kCGEventRightMouseUp) |
+               (1 << kCGEventScrollWheel));
 
   eventTap = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap, 0,
                               eventMask, eventTapCallback, &userInfo);
-  // eventTap = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap, 0,
-  // eventMask, myCGEventCallback, &pressed);
 
   // Run the callback function to initialise displays array, then register it.
   displayReconfigurationCallback(0, 0, &displaysInfo);
   CGDisplayRegisterReconfigurationCallback(displayReconfigurationCallback,
                                            &displaysInfo);
-  displayReconfigurationCallback(0, 0, &displaysInfo);
-
   if (!eventTap) {
     printf("Failed to create event tap\n");
     return;
   }
-
   runLoopSource =
       CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0);
   CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource,
                      kCFRunLoopCommonModes);
   CGEventTapEnable(eventTap, true);
-
   bool successfulNSApplicationLoad = WrappedNSApplicationLoad();
   if (!successfulNSApplicationLoad) {
     printf("Failed to load NSApplication\n");
     return;
   }
-
   CFRunLoopRun();
-
   CGDisplayRemoveReconfigurationCallback(displayReconfigurationCallback,
                                          &displaysInfo);
 }
 
 // #region Utils
 
-bool eventTypeIsMouse(CGEventType type) {
+long diffTimespec(struct timespec *start) {
+  struct timespec end;
+  clock_gettime(CLOCK_REALTIME, &end);
+
+  return (end.tv_sec - start->tv_sec) * 1000 +
+         (end.tv_nsec - start->tv_nsec) / 1000000;
+}
+
+double pointsToPx(double points, struct Display display) {
+  return points * display.size_physical_px.width /
+         display.bounds_points.size.width;
+}
+
+double pointsToMm(double points, struct Display display) {
+  return points * display.size_mm.width / display.bounds_points.size.width;
+}
+
+double hypot(double x, double y) { return sqrtf(powf(x, 2) + powf(y, 2)); }
+
+bool eventTypeIsMouseClick(CGEventType type) {
   return type == kCGEventLeftMouseDown || type == kCGEventLeftMouseUp ||
          type == kCGEventRightMouseDown || type == kCGEventRightMouseUp ||
          type == kCGEventOtherMouseDown || type == kCGEventOtherMouseUp;
 }
+
 bool eventTypeIsLeftMouse(CGEventType type) {
   return type == kCGEventLeftMouseDown || type == kCGEventLeftMouseDragged ||
          type == kCGEventLeftMouseUp;
@@ -238,6 +297,38 @@ bool eventTypeIsRightMouse(CGEventType type) {
 bool eventTypeIsOtherMouse(CGEventType type) {
   return type == kCGEventOtherMouseDown || type == kCGEventOtherMouseDragged ||
          type == kCGEventOtherMouseUp;
+}
+bool eventTypeIsScrollWheel(CGEventType type) {
+  return type == kCGEventScrollWheel;
+}
+
+bool eventTypeIsKeyboard(CGEventType type) {
+  return type == kCGEventKeyDown || type == kCGEventKeyUp;
+}
+
+char *keyCodeToChar(CGKeyCode keyCode) {
+  TISInputSourceRef currentKeyboard = TISCopyCurrentKeyboardInputSource();
+  CFDataRef layoutData = TISGetInputSourceProperty(
+      currentKeyboard, kTISPropertyUnicodeKeyLayoutData);
+  const UCKeyboardLayout *keyboardLayout =
+      (const UCKeyboardLayout *)CFDataGetBytePtr(layoutData);
+
+  UInt32 deadKeyState = 0;
+  UniChar unicodeString[4] = {0};
+  UniCharCount actualStringLength = 0;
+
+  UCKeyTranslate(keyboardLayout, keyCode, kUCKeyActionDisplay, 0,
+                 LMGetKbdType(), kUCKeyTranslateNoDeadKeysBit, &deadKeyState,
+                 sizeof(unicodeString) / sizeof(UniChar), &actualStringLength,
+                 unicodeString);
+
+  CFRelease(currentKeyboard);
+
+  char *ret = malloc(sizeof(char) * 4);
+  for (int i = 0; i < 4; i++) {
+    ret[i] = unicodeString[i];
+  }
+  return ret;
 }
 
 // #endregion

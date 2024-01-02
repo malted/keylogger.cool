@@ -14,3 +14,7 @@ I will be running this tool for all of 2024 to get a year in review of my typing
   <source media="(min-width: 701px)" srcset="assets/flowchart.png" width="50%">
   <img src="assets/flowchart.png" alt="control flowchart">
 </picture>
+
+
+### Documentation
+Every keypress is inserted into an in-memory staging database. Even though these are in order,

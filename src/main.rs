@@ -1,57 +1,76 @@
+#![feature(slice_split_once)]
+#![feature(str_split_remainder)]
+
 mod defs;
-use defs::{ActionEvent, ActionEventC};
-use once_cell::sync::Lazy;
-use parking_lot::Mutex;
-use rusqlite::Connection;
+mod migrations;
 mod utils;
-use utils::store_action_event;
+use defs::event::Event;
 
-static DB: Lazy<Mutex<Connection>> = Lazy::new(|| {
-    let db_path = if cfg!(debug_assertions) {
-        "db.sqlite".to_string()
-    } else {
-        format!("{}/.klcool/db.sqlite", std::env::var("HOME").unwrap())
-    };
-    Mutex::new(Connection::open(db_path).expect("Failed to open database."))
-});
+use parking_lot::{Mutex, RwLock};
+use utils::{init_databases, store_action_event};
 
-#[no_mangle]
-pub unsafe extern "C" fn action_event_delegate(c_struct: *mut ActionEventC) {
-    let ae: ActionEvent = (*c_struct).tidy_up();
+pub static DB_AGGREGATE: Mutex<Option<rusqlite::Connection>> = Mutex::new(None);
 
-    match store_action_event(&DB, &ae) {
-        Ok(_) => println!("Stored action event."),
-        Err(e) => println!("Error storing action event: {}", e),
+static MAX_STAGED_KEYPRESS_COUNT: isize = 10; // Dev
+static STAGED_KEYPRESS_COUNT: RwLock<isize> = RwLock::new(0);
+static mut CURRENT_WORD: Vec<Event> = Vec::new();
+
+pub fn handle_event(event: Event) {
+    match event {
+        Event::Keyboard {
+            base,
+            time_down_ms,
+            key_code,
+            key_char,
+        } => println!("{time_down_ms}"),
+        _ => {}
     }
-    println!("{:#?}", ae);
 
-    if ae.key_code == 0 {
-        let count: i32 = DB
-            .lock()
-            .query_row("SELECT count(*) FROM staged_inputs", [], |row| row.get(0))
-            .unwrap();
-        println!("count: {}", count);
+    // if event.base.r#type.is_keyboard_event() {
+    //     *STAGED_KEYPRESS_COUNT.write() += 1;
 
-        // For each process, get the number of events
-        let mut process_counts: Vec<(String, i32)> = DB
-            .lock()
-            .prepare(
-                "SELECT processes.name, count(*) FROM staged_inputs
-                 INNER JOIN processes ON processes.id = staged_inputs.process_id
-                 GROUP BY process_id",
-            )
-            .unwrap()
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-            .unwrap()
-            .map(|r| r.unwrap())
-            .collect();
+    //     if *STAGED_KEYPRESS_COUNT.read() >= MAX_STAGED_KEYPRESS_COUNT {
+    //         let hour = chrono::Local::now().hour();
 
-        process_counts.sort_by(|a, b| b.1.cmp(&a.1));
+    //         *STAGED_KEYPRESS_COUNT.write() = 0;
+    //     }
+    // }
 
-        for (process_name, count) in process_counts {
-            println!("{}: {}", process_name, count);
-        }
-    }
+    // match store_action_event(&event) {
+    //     Ok(_) => (),
+    //     Err(e) => {
+    //         println!("Error storing action event: {}", e);
+    //         return;
+    //     }
+    // }
+
+    // if ae.key_code == 0 {
+    //     let count: i32 = DB_STAGING
+    //         .lock()
+    //         .query_row("SELECT count(*) FROM staged_inputs", [], |row| row.get(0))
+    //         .unwrap();
+    //     println!("count: {}", count);
+
+    //     // For each process, get the number of events
+    //     let mut process_counts: Vec<(String, i32)> = DB_STAGING
+    //         .lock()
+    //         .prepare(
+    //             "SELECT processes.name, count(*) FROM staged_inputs
+    //              INNER JOIN processes ON processes.id = staged_inputs.process_id
+    //              GROUP BY process_id",
+    //         )
+    //         .unwrap()
+    //         .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+    //         .unwrap()
+    //         .map(|r| r.unwrap())
+    //         .collect();
+
+    //     process_counts.sort_by(|a, b| b.1.cmp(&a.1));
+
+    //     for (process_name, count) in process_counts {
+    //         println!("{}: {}", process_name, count);
+    //     }
+    // }
 }
 
 extern "C" {
@@ -59,34 +78,9 @@ extern "C" {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    DB.lock().execute(
-        "CREATE TABLE IF NOT EXISTS processes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE
-         )",
-        [],
-    )?;
-
-    DB.lock().execute(
-        "CREATE TABLE IF NOT EXISTS staged_inputs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                time_down_ms INTEGER,
-                type INTEGER,
-                key_code INTEGER,
-                mouse_x REAL,
-                mouse_y REAL,
-                dragged_distance_px INTEGER,
-                is_builtin_display INTEGER,
-                is_main_display INTEGER,
-                process_id INTEGER,
-                execution_time_us INTEGER,
-                FOREIGN KEY(process_id) REFERENCES processes(id)
-             )",
-        [],
-    )?;
-
+    init_databases()?;
     unsafe { registerTap() };
-    println!("Rust is exiting.");
 
+    println!("Rust is exiting.");
     Ok(())
 }

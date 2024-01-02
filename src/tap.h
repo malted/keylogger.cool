@@ -1,18 +1,23 @@
 #include <ApplicationServices/ApplicationServices.h>
 
 #define PRESSED_ARR_SIZE 512
-#define DISPLAY_ARR_SIZE 16
+#define KEYCODE_MOUSE_LEFT PRESSED_ARR_SIZE - 1
+#define KEYCODE_MOUSE_RIGHT PRESSED_ARR_SIZE - 2
+#define KEYCODE_MOUSE_OTHER PRESSED_ARR_SIZE - 3
 
-#define LEFT_MOUSE_KEYCODE PRESSED_ARR_SIZE - 1
-#define RIGHT_MOUSE_KEYCODE PRESSED_ARR_SIZE - 2
-#define OTHER_MOUSE_KEYCODE PRESSED_ARR_SIZE - 3
+#define DISPLAY_ARR_SIZE 16
+#define MM_PER_INCH 25.4;
 
 struct ActionEvent {
   long timeDown;
   CGEventType type;
   unsigned short keyCode;
+  char *keyChar;
   CGPoint normalisedClickPoint;
-  unsigned int dragDistance;
+  int scrollDeltaX;
+  int scrollDeltaY;
+  double dragDistancePx;
+  double dragDistanceMm;
   bool isBuiltinDisplay;
   bool isMainDisplay;
   char *processName;
@@ -20,7 +25,9 @@ struct ActionEvent {
 };
 
 struct Display {
-  CGRect bounds;
+  CGRect bounds_points;
+  CGSize size_mm;
+  CGSize size_physical_px;
   bool isMain;
   bool isBuiltin;
 };
@@ -48,7 +55,16 @@ extern void action_event_delegate(struct ActionEvent *c_struct);
 struct Display *_Nullable manuallyGetDisplaysFromPoint(
     struct DisplaysInfo *displayInfo, CGPoint point);
 
-bool eventTypeIsMouse(CGEventType type);
+long diffTimespec(struct timespec *start);
+
+double pointsToPx(double points, struct Display display);
+double pointsToMm(double points, struct Display display);
+
+bool eventTypeIsMouseClick(CGEventType type);
 bool eventTypeIsLeftMouse(CGEventType type);
 bool eventTypeIsRightMouse(CGEventType type);
 bool eventTypeIsOtherMouse(CGEventType type);
+bool eventTypeIsScrollWheel(CGEventType type);
+bool eventTypeIsKeyboard(CGEventType type);
+
+char *keyCodeToChar(CGKeyCode keyCode);

@@ -2,4 +2,5 @@
 .env
 launchd-logs
 *.db
+*.sqlite*
 .DS_Store
