@@ -9,6 +9,13 @@
 
 CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
                             CGEventRef event, void *userInfo) {
+  /* If you hold a key down, every time t (depending on your keyboard key
+   * repetition configuation) macOS (quartz?) will insert a new key down
+   * event, which we don't want to track. Luckily, there's a handy flag to
+   * detect this! */
+  if (CGEventGetDoubleValueField(event, kCGKeyboardEventAutorepeat))
+    return event;
+
   struct UserInfo *passedInfo = (struct UserInfo *)userInfo;
 
   // For profiling
@@ -98,13 +105,9 @@ CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
     free(keyChar);
     // Scroll
   } else {
-    /* If you hold a key down, every time t (depending on your keyboard key
-     * repetition configuation) macOS (quartz?) will insert a new key down
-     * event, which we don't want to track. Luckily, there's a handy flag to
-     * detect this! */
-    if (eventTypeIsKeyboard(type) || eventTypeIsMouseClick(type) ||
-        !CGEventGetDoubleValueField(event, kCGKeyboardEventAutorepeat)) {
+    if (eventTypeIsKeyboard(type) || eventTypeIsMouseClick(type)) {
       clock_gettime(CLOCK_REALTIME, passedInfo->pressed[keyCode].pressed);
+      printf("pressed %d\n", keyCode);
     }
 
     // If it's a mouse down event, record the local click point.
