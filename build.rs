@@ -1,8 +1,8 @@
 #[path = "src/defs/migrations.rs"]
 mod migrations;
-use migrations::{Migration, COMPILED_MIGRATION_FILENAME, MIGRATIONS_PATH};
+use migrations::{Migration, COMPILED_MIGRATION_FILENAME, DELIMITER, MIGRATIONS_PATH};
 
-use std::{env, fs, io, path::Path};
+use std::{env, fs, path::Path};
 
 fn main() {
     encode_migrations().expect("failed to encode the migrations");
@@ -20,11 +20,6 @@ fn main() {
 }
 
 pub fn encode_migrations() -> Result<(), Box<dyn std::error::Error>> {
-    // match fs::remove_file(&path) {
-    //     Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(Box::new(e)),
-    //     _ => {}
-    // };
-
     let mut migrations: Vec<Migration> = Vec::new();
 
     for migration in fs::read_dir(MIGRATIONS_PATH)? {
@@ -57,7 +52,7 @@ pub fn encode_migrations() -> Result<(), Box<dyn std::error::Error>> {
     // Write the migrations to a csv file
     let out_path = Path::new(&env::var("OUT_DIR")?).join(COMPILED_MIGRATION_FILENAME);
     let mut wtr = csv::WriterBuilder::new()
-        .delimiter('~' as u8)
+        .delimiter(DELIMITER as u8)
         .from_path(&out_path)?;
 
     for migration in migrations {

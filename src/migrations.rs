@@ -1,11 +1,11 @@
-use crate::defs::migrations::{Migration, COMPILED_MIGRATION_FILENAME, MIGRATIONS_PATH};
+use crate::defs::migrations::{Migration, COMPILED_MIGRATION_FILENAME, DELIMITER, MIGRATIONS_PATH};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const MIGRATIONS: &'static str = &include_str!(concat!(env!("OUT_DIR"), "/migrations.csv"));
 
 pub fn run_pending_migrations() -> Result<(), Box<dyn std::error::Error>> {
     let mut rdr = csv::ReaderBuilder::new()
-        .delimiter('~' as u8)
+        .delimiter(DELIMITER as u8)
         .from_reader(MIGRATIONS.as_bytes());
 
     let mut migrations: Vec<Migration> = rdr

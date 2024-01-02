@@ -10,3 +10,4 @@ pub struct Migration {
 
 pub static MIGRATIONS_PATH: &str = "migrations";
 pub static COMPILED_MIGRATION_FILENAME: &str = "migrations.csv";
+pub static DELIMITER: char = '~';
