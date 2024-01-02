@@ -31,7 +31,7 @@ pub fn run_pending_migrations() -> Result<(), Box<dyn std::error::Error>> {
 
         // Log it in the migrations table
         conn.execute(
-            "INSERT INTO migrations (direction, migration_version_timestamp) VALUES ('U', ?)",
+            "INSERT INTO migration (direction, migration_version_timestamp) VALUES ('U', ?)",
             [migration.timestamp as i64],
         )?;
     }
@@ -44,7 +44,7 @@ pub fn last_executed_migration_timestamp() -> rusqlite::Result<u64> {
     let conn = conn.as_ref().expect("don't call this before db init!");
 
     let migration_table_count: usize = conn.query_row(
-        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='migrations'",
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='migration'",
         [],
         |row| row.get(0),
     )?;
@@ -53,13 +53,13 @@ pub fn last_executed_migration_timestamp() -> rusqlite::Result<u64> {
         return Ok(0);
     } else if migration_table_count > 1 {
         panic!(
-            "there should only be one 'migrations' table, but there are {}",
+            "there should only be one 'migration' table, but there are {}",
             migration_table_count
         );
     }
 
     conn.query_row(
-        "SELECT migration_version_timestamp FROM migrations ORDER BY id DESC LIMIT 1",
+        "SELECT migration_version_timestamp FROM migration ORDER BY id DESC LIMIT 1",
         [],
         |row| row.get(0),
     )

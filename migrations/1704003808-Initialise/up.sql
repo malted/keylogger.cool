@@ -49,7 +49,7 @@ CREATE TABLE scroll_event (
 	FOREIGN KEY(process_id) REFERENCES process(id)
 );
 
-CREATE TABLE migrations (
+CREATE TABLE migration (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	direction CHAR(1) CHECK(direction in ('U', 'D')) NOT NULL,
 	migration_version_timestamp INTEGER NOT NULL
