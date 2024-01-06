@@ -14,6 +14,8 @@ struct ActionEvent {
   unsigned short keyCode;
   char *keyChar;
   CGPoint normalisedClickPoint;
+  double mouseDistancePx;
+  double mouseDistanceMm;
   int scrollDeltaX;
   int scrollDeltaY;
   double dragDistancePx;
@@ -21,6 +23,7 @@ struct ActionEvent {
   bool isBuiltinDisplay;
   bool isMainDisplay;
   char *processName;
+  char *keyboardLayout;
   struct timespec functionStart;
 };
 
@@ -61,6 +64,7 @@ double pointsToPx(double points, struct Display display);
 double pointsToMm(double points, struct Display display);
 
 bool eventTypeIsMouseClick(CGEventType type);
+bool eventTypeIsMouseMove(CGEventType type);
 bool eventTypeIsLeftMouse(CGEventType type);
 bool eventTypeIsRightMouse(CGEventType type);
 bool eventTypeIsOtherMouse(CGEventType type);
