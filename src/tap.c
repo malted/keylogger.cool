@@ -9,6 +9,10 @@
 
 CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
                             CGEventRef event, void *userInfo) {
+  // For profiling
+  struct timespec start;
+  clock_gettime(CLOCK_REALTIME, &start);
+
   /* If you hold a key down, every time t (depending on your keyboard key
    * repetition configuation) macOS (quartz?) will insert a new key down
    * event, which we don't want to track. Luckily, there's a handy flag to
@@ -16,14 +20,28 @@ CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
   if (CGEventGetDoubleValueField(event, kCGKeyboardEventAutorepeat))
     return event;
 
-  struct UserInfo *passedInfo = (struct UserInfo *)userInfo;
+  if (type == kCGEventTapDisabledByUserInput) {
+    printf("Event tap disabled by user input\n");
+    exit(4225);
+  } else if (type == kCGEventTapDisabledByTimeout) {
+    printf("Event tap disabled by timeout\n");
+    exit(4226);
+  }
 
-  // For profiling
-  struct timespec start;
-  clock_gettime(CLOCK_REALTIME, &start);
+  struct UserInfo *passedInfo = (struct UserInfo *)userInfo;
 
   CGKeyCode keyCode =
       (CGKeyCode)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
+
+  char layout[128];
+  memset(layout, '\0', sizeof(layout));
+  TISInputSourceRef source = TISCopyCurrentKeyboardInputSource();
+  // get input source id - kTISPropertyInputSourceID
+  // get layout name - kTISPropertyLocalizedName
+  CFStringRef layoutID =
+      TISGetInputSourceProperty(source, kTISPropertyInputSourceID);
+  CFStringGetCString(layoutID, layout, sizeof(layout), kCFStringEncodingUTF8);
+  printf("%s\n", layout);
 
   if (eventTypeIsLeftMouse(type)) {
     keyCode = KEYCODE_MOUSE_LEFT;
@@ -71,10 +89,11 @@ CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
   // For reference, see CGEventTypes.h L102.
   if (type == kCGEventLeftMouseUp || type == kCGEventRightMouseUp ||
       type == kCGEventKeyUp || type == kCGEventOtherMouseUp ||
-      type == kCGEventScrollWheel) {
+      type == kCGEventScrollWheel || type == kCGEventMouseMoved) {
     char *keyChar = keyCodeToChar(keyCode);
 
-    double dragDistancePx = 0, dragDistanceMm = 0;
+    double dragDistancePx = 0, dragDistanceMm = 0, mouseDistancePx = 0,
+           mouseDistanceMm = 0;
     if (eventTypeIsMouseClick(type)) {
       // Calculate the distance between the click point and the release point,
       // and round to nearest int
@@ -84,6 +103,13 @@ CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
 
       dragDistancePx = pointsToPx(dragDistancePoints, *display);
       dragDistanceMm = pointsToMm(dragDistancePoints, *display);
+    } else if (eventTypeIsMouseMove(type)) {
+      double mouseDistancePoints = round(sqrt(
+          pow(CGEventGetIntegerValueField(event, kCGMouseEventDeltaX), 2) +
+          pow(CGEventGetIntegerValueField(event, kCGMouseEventDeltaY), 2)));
+
+      mouseDistancePx = pointsToPx(mouseDistancePoints, *display);
+      mouseDistanceMm = pointsToMm(mouseDistancePoints, *display);
     }
 
     action_event_delegate(&(struct ActionEvent){
@@ -92,6 +118,8 @@ CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
         .keyCode = keyCode,
         .keyChar = keyChar,
         .normalisedClickPoint = normalisedClickPoint,
+        .mouseDistancePx = mouseDistancePx,
+        .mouseDistanceMm = mouseDistanceMm,
         .scrollDeltaX = scrollDeltaX,
         .scrollDeltaY = scrollDeltaY,
         .dragDistancePx = dragDistancePx,
@@ -99,15 +127,15 @@ CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
         .isBuiltinDisplay = display->isBuiltin,
         .isMainDisplay = display->isMain,
         .functionStart = start,
+        .keyboardLayout = layout,
         .processName = processName,
     });
 
     free(keyChar);
-    // Scroll
+    CFRelease(source);
   } else {
     if (eventTypeIsKeyboard(type) || eventTypeIsMouseClick(type)) {
       clock_gettime(CLOCK_REALTIME, passedInfo->pressed[keyCode].pressed);
-      printf("pressed %d\n", keyCode);
     }
 
     // If it's a mouse down event, record the local click point.
@@ -234,7 +262,7 @@ void registerTap(void) {
   eventMask = ((1 << kCGEventKeyDown) | (1 << kCGEventKeyUp) |
                (1 << kCGEventLeftMouseDown) | (1 << kCGEventRightMouseDown) |
                (1 << kCGEventLeftMouseUp) | (1 << kCGEventRightMouseUp) |
-               (1 << kCGEventScrollWheel));
+               (1 << kCGEventScrollWheel) | (1 << kCGEventMouseMoved));
 
   eventTap = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap, 0,
                               eventMask, eventTapCallback, &userInfo);
@@ -287,6 +315,9 @@ bool eventTypeIsMouseClick(CGEventType type) {
   return type == kCGEventLeftMouseDown || type == kCGEventLeftMouseUp ||
          type == kCGEventRightMouseDown || type == kCGEventRightMouseUp ||
          type == kCGEventOtherMouseDown || type == kCGEventOtherMouseUp;
+}
+bool eventTypeIsMouseMove(CGEventType type) {
+  return type == kCGEventMouseMoved;
 }
 
 bool eventTypeIsLeftMouse(CGEventType type) {
