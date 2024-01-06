@@ -81,14 +81,20 @@ pub enum Event {
         normalised_click_point: (f32, f32),
         dragged_distance_px: u32,
         dragged_distance_mm: u32,
+        drag_angle: Option<f32>,
+        drag_speed_kph: f32,
     },
     MouseMove {
         base: BaseEvent,
         distance_px: u32,
         distance_mm: u32,
+        mouse_angle: Option<f32>,
+        mouse_speed_kph: f32,
     },
     Scroll {
         base: BaseEvent,
         scroll_delta: (i32, i32),
+        scroll_angle: Option<f32>,
+        scroll_speed_kph: f32,
     },
 }

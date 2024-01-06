@@ -4,6 +4,7 @@
 mod defs;
 mod migrations;
 mod utils;
+use chrono::Timelike;
 use defs::event::Event;
 
 use parking_lot::{Mutex, RwLock};
@@ -11,30 +12,58 @@ use utils::{init_databases, store_action_event};
 
 pub static DB_AGGREGATE: Mutex<Option<rusqlite::Connection>> = Mutex::new(None);
 
-static MAX_STAGED_KEYPRESS_COUNT: isize = 10; // Dev
+static MAX_STAGED_KEYPRESS_COUNT: isize = 100; // Dev
 static STAGED_KEYPRESS_COUNT: RwLock<isize> = RwLock::new(0);
-static mut CURRENT_WORD: Vec<Event> = Vec::new();
+
+static mut STAGED_INPUTS: Vec<Event> = Vec::new();
+static LAST_PROCESS_NAME: RwLock<Option<String>> = RwLock::new(None);
+
+// Mouse move events stage
+struct EventMMAgregateStage {}
 
 pub fn handle_event(event: Event) {
+    // println!("{:?}", &event);
+
+    unsafe { STAGED_INPUTS.push(event.clone()) };
+
     match event {
         Event::Keyboard {
             base,
-            time_down_ms,
-            key_code,
-            key_char,
-        } => println!("{time_down_ms}"),
+            keyboard_layout,
+            ..
+        } => {
+            if let Some(last_process_name) = LAST_PROCESS_NAME.read().clone() {
+                println!("subsequent event; layout: {keyboard_layout}");
+            } else {
+                // First event
+                println!("first event");
+            }
+            // if *STAGED_KEYPRESS_COUNT.read() >= MAX_STAGED_KEYPRESS_COUNT {
+            //     let hour = chrono::Local::now().hour();
+
+            //     *STAGED_KEYPRESS_COUNT.write() = 0;
+            // }
+            LAST_PROCESS_NAME.write().replace(base.process_name);
+        }
+        Event::MouseMove {
+            base,
+            distance_px,
+            distance_mm,
+            mouse_angle,
+            ..
+        } => {
+            // println!("mouse angle: {:?}", mouse_angle);
+        }
+        Event::Scroll {
+            base,
+            scroll_delta,
+            scroll_angle,
+            scroll_speed_kph,
+        } => {
+            // println!("scroll speed km/h: {scroll_speed_kph}");
+        }
         _ => {}
     }
-
-    // if event.base.r#type.is_keyboard_event() {
-    //     *STAGED_KEYPRESS_COUNT.write() += 1;
-
-    //     if *STAGED_KEYPRESS_COUNT.read() >= MAX_STAGED_KEYPRESS_COUNT {
-    //         let hour = chrono::Local::now().hour();
-
-    //         *STAGED_KEYPRESS_COUNT.write() = 0;
-    //     }
-    // }
 
     // match store_action_event(&event) {
     //     Ok(_) => (),

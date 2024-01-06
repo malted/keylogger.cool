@@ -4,6 +4,8 @@
 #define KEYCODE_MOUSE_LEFT PRESSED_ARR_SIZE - 1
 #define KEYCODE_MOUSE_RIGHT PRESSED_ARR_SIZE - 2
 #define KEYCODE_MOUSE_OTHER PRESSED_ARR_SIZE - 3
+#define KEYCODE_SCROLL_WHEEL PRESSED_ARR_SIZE - 4
+#define KEYCODE_MOUSE_MOVE PRESSED_ARR_SIZE - 5
 
 #define DISPLAY_ARR_SIZE 16
 #define MM_PER_INCH 25.4;
@@ -16,15 +18,21 @@ struct ActionEvent {
   CGPoint normalisedClickPoint;
   double mouseDistancePx;
   double mouseDistanceMm;
+  double mouseAngle;
+  double mouseSpeedKph;
   int scrollDeltaX;
   int scrollDeltaY;
+  double scrollAngle;
+  double scrollSpeedKph;
   double dragDistancePx;
   double dragDistanceMm;
+  double dragAngle;
+  double dragSpeedKph;
   bool isBuiltinDisplay;
   bool isMainDisplay;
-  char *processName;
-  char *keyboardLayout;
   struct timespec functionStart;
+  char *keyboardLayout;
+  char *processName;
 };
 
 struct Display {

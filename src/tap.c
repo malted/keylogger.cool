@@ -2,8 +2,11 @@
 #include "DisplayConfiguration.h"
 #include <ApplicationServices/ApplicationServices.h>
 #include <Carbon/Carbon.h>
+#include <CoreFoundation/CoreFoundation.h>
 #include <CoreGraphics/CoreGraphics.h>
 #include <libproc.h>
+#include <mach/clock_types.h>
+#include <math.h>
 #include <stdio.h>
 #include <time.h>
 
@@ -41,7 +44,6 @@ CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
   CFStringRef layoutID =
       TISGetInputSourceProperty(source, kTISPropertyInputSourceID);
   CFStringGetCString(layoutID, layout, sizeof(layout), kCFStringEncodingUTF8);
-  printf("%s\n", layout);
 
   if (eventTypeIsLeftMouse(type)) {
     keyCode = KEYCODE_MOUSE_LEFT;
@@ -49,14 +51,11 @@ CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
     keyCode = KEYCODE_MOUSE_RIGHT;
   } else if (eventTypeIsOtherMouse(type)) {
     keyCode = KEYCODE_MOUSE_OTHER;
+  } else if (eventTypeIsScrollWheel(type)) {
+    keyCode = KEYCODE_SCROLL_WHEEL;
+  } else if (eventTypeIsMouseMove(type)) {
+    keyCode = KEYCODE_MOUSE_MOVE;
   }
-
-  // https://developer.apple.com/documentation/coregraphics/cgeventfield/kcgscrollwheeleventpointdeltaaxis1
-  // https://gist.github.com/svoisen/5215826
-  int scrollDeltaY =
-      CGEventGetIntegerValueField(event, kCGScrollWheelEventPointDeltaAxis1);
-  int scrollDeltaX =
-      CGEventGetIntegerValueField(event, kCGScrollWheelEventPointDeltaAxis2);
 
   // Get the process' name.
   int pid = CGEventGetIntegerValueField(event, kCGEventTargetUnixProcessID);
@@ -79,6 +78,8 @@ CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
   locationLocal.x = locationGlobal.x - display->bounds_points.origin.x;
   locationLocal.y = locationGlobal.y - display->bounds_points.origin.y;
 
+  // TODO: Handle key down events here so we can exit early.
+
   // Click coords, normalised (local display space)
   CGPoint normalisedClickPoint = {0};
   normalisedClickPoint.x = locationLocal.x / display->bounds_points.size.width;
@@ -92,24 +93,81 @@ CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
       type == kCGEventScrollWheel || type == kCGEventMouseMoved) {
     char *keyChar = keyCodeToChar(keyCode);
 
-    double dragDistancePx = 0, dragDistanceMm = 0, mouseDistancePx = 0,
-           mouseDistanceMm = 0;
-    if (eventTypeIsMouseClick(type)) {
+    int scrollDeltaX = 0, scrollDeltaY = 0;
+    double scrollAngle = 0, scrollSpeed = 0, dragDistancePx = 0,
+           dragDistanceMm = 0, dragAngle = 0, dragSpeed = 0,
+           mouseDistancePx = 0, mouseDistanceMm = 0, mouseAngle = 0,
+           mouseSpeed = 0;
+
+    if (eventTypeIsScrollWheel(type)) {
+      // https://developer.apple.com/documentation/coregraphics/cgeventfield/kcgscrollwheeleventpointdeltaaxis1
+      // https://gist.github.com/svoisen/5215826
+      scrollDeltaY = CGEventGetIntegerValueField(
+          event, kCGScrollWheelEventPointDeltaAxis1);
+      scrollDeltaX = CGEventGetIntegerValueField(
+          event, kCGScrollWheelEventPointDeltaAxis2);
+
+      double scrollDistancePoints =
+          round(sqrt(pow(scrollDeltaX, 2) + pow(scrollDeltaY, 2)));
+      double scrollDistanceMm = pointsToMm(scrollDistancePoints, *display);
+
+      scrollAngle = atan2(scrollDeltaY, scrollDeltaX);
+
+      if (passedInfo->pressed[keyCode].pressed->tv_sec != 0) {
+        // mm / ms
+        scrollSpeed = scrollDistanceMm /
+                      diffTimespec(passedInfo->pressed[keyCode].pressed);
+
+        // Convrt to km/h. This is so cursed.
+        scrollSpeed *= 3.6;
+      }
+      clock_gettime(REALTIME_CLOCK, passedInfo->pressed[keyCode].pressed);
+    } else if (eventTypeIsMouseClick(type)) {
       // Calculate the distance between the click point and the release point,
       // and round to nearest int
-      double dragDistancePoints = round(sqrt(
-          pow(passedInfo->pressed[keyCode].clickPoint.x - locationLocal.x, 2) +
-          pow(passedInfo->pressed[keyCode].clickPoint.y - locationLocal.y, 2)));
+      double dragDistanceX =
+          locationLocal.x - passedInfo->pressed[keyCode].clickPoint.x;
+      double dragDistanceY =
+          locationLocal.y - passedInfo->pressed[keyCode].clickPoint.y;
+
+      dragAngle = atan2(dragDistanceY, dragDistanceX);
+
+      double dragDistancePoints =
+          round(sqrt(pow(dragDistanceX, 2) + pow(dragDistanceY, 2)));
 
       dragDistancePx = pointsToPx(dragDistancePoints, *display);
       dragDistanceMm = pointsToMm(dragDistancePoints, *display);
+
+      if (passedInfo->pressed[keyCode].pressed->tv_sec != 0) {
+        // km/h
+        dragSpeed = dragDistanceMm /
+                    diffTimespec(passedInfo->pressed[keyCode].pressed) * 3.6;
+      }
+
+      clock_gettime(REALTIME_CLOCK, passedInfo->pressed[keyCode].pressed);
     } else if (eventTypeIsMouseMove(type)) {
-      double mouseDistancePoints = round(sqrt(
-          pow(CGEventGetIntegerValueField(event, kCGMouseEventDeltaX), 2) +
-          pow(CGEventGetIntegerValueField(event, kCGMouseEventDeltaY), 2)));
+      double mouseDeltaX =
+          CGEventGetIntegerValueField(event, kCGMouseEventDeltaX);
+      double mouseDeltaY =
+          CGEventGetIntegerValueField(event, kCGMouseEventDeltaY);
+
+      mouseAngle = atan2(mouseDeltaX, mouseDeltaY);
+
+      double mouseDistancePoints =
+          round(sqrt(pow(mouseDeltaX, 2) + pow(mouseDeltaY, 2)));
 
       mouseDistancePx = pointsToPx(mouseDistancePoints, *display);
       mouseDistanceMm = pointsToMm(mouseDistancePoints, *display);
+
+      if (passedInfo->pressed[keyCode].pressed->tv_sec != 0) {
+        // km/h
+        long mouseSpeed = mouseDistanceMm /
+                          diffTimespec(passedInfo->pressed[keyCode].pressed) *
+                          3.6;
+
+        printf("mouseSpeed: %ld\n", mouseSpeed);
+      }
+      clock_gettime(REALTIME_CLOCK, passedInfo->pressed[keyCode].pressed);
     }
 
     action_event_delegate(&(struct ActionEvent){
@@ -120,10 +178,16 @@ CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
         .normalisedClickPoint = normalisedClickPoint,
         .mouseDistancePx = mouseDistancePx,
         .mouseDistanceMm = mouseDistanceMm,
+        .mouseAngle = mouseAngle,
+        .mouseSpeedKph = mouseSpeed,
         .scrollDeltaX = scrollDeltaX,
         .scrollDeltaY = scrollDeltaY,
+        .scrollAngle = scrollAngle,
+        .scrollSpeedKph = scrollSpeed,
         .dragDistancePx = dragDistancePx,
         .dragDistanceMm = dragDistanceMm,
+        .dragAngle = dragAngle,
+        .dragSpeedKph = dragSpeed,
         .isBuiltinDisplay = display->isBuiltin,
         .isMainDisplay = display->isMain,
         .functionStart = start,
@@ -237,6 +301,9 @@ void displayReconfigurationCallback(CGDirectDisplayID display,
 }
 
 void registerTap(void) {
+  char *exampleSentence = "The quick brown fox jumps over the lazy dog.";
+  nl(exampleSentence);
+
   struct PressedInfo pressed[PRESSED_ARR_SIZE];
   for (int i = 0; i < PRESSED_ARR_SIZE; i++) {
     pressed[i] = (struct PressedInfo){

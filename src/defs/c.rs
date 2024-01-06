@@ -32,18 +32,25 @@ pub struct ActionEventC {
     normalised_click_point: CGPointC,
     mouse_distance_px: c_double,
     mouse_distance_mm: c_double,
+    mouse_angle: c_double,
+    mouse_speed_kph: c_double,
     scroll_delta_x: c_int,
     scroll_delta_y: c_int,
+    scroll_angle: c_double,
+    scroll_speed_kph: c_double,
     dragged_distance_px: c_double,
     dragged_distance_mm: c_double,
+    drag_angle: c_double,
+    drag_speed_kph: c_double,
     is_builtin_display: bool,
     is_main_display: bool,
-    process_name: *const c_char,
-    keyboard_layout: *const c_char,
     function_start: TimespecC,
+    keyboard_layout: *const c_char,
+    process_name: *const c_char,
 }
 impl ActionEventC {
     pub fn tidy_up(&self) -> Result<Event, Box<dyn std::error::Error>> {
+        println!("{:#?}", self);
         let r#type = EventType::from_u32(self.r#type.0);
 
         let process_name_cstr = unsafe { CStr::from_ptr(self.process_name) };
@@ -70,6 +77,14 @@ impl ActionEventC {
             }
         };
 
+        let safe_f32 = |f: f32| {
+            if f.is_nan() || !f.is_finite() {
+                0_f32
+            } else {
+                f
+            }
+        };
+
         let base = BaseEvent {
             r#type,
             is_builtin_display: self.is_builtin_display,
@@ -91,22 +106,40 @@ impl ActionEventC {
                 base,
                 time_down_ms: self.time_down as u32,
                 normalised_click_point: (
-                    self.normalised_click_point.x as f32,
-                    self.normalised_click_point.y as f32,
+                    safe_f32(self.normalised_click_point.x as f32),
+                    safe_f32(self.normalised_click_point.y as f32),
                 ),
                 dragged_distance_px: self.dragged_distance_px as u32,
                 dragged_distance_mm: self.dragged_distance_mm as u32,
+                drag_angle: if self.dragged_distance_px == 0_f64 {
+                    None
+                } else {
+                    Some(safe_f32(self.drag_angle as f32))
+                },
+                drag_speed_kph: safe_f32(self.drag_speed_kph as f32),
             }
         } else if r#type.is_mouse_move_event() {
             Event::MouseMove {
                 base,
                 distance_px: self.mouse_distance_mm as u32,
                 distance_mm: self.mouse_distance_mm as u32,
+                mouse_angle: if self.mouse_distance_px == 0_f64 {
+                    None
+                } else {
+                    Some(safe_f32(self.mouse_angle as f32))
+                },
+                mouse_speed_kph: safe_f32(self.drag_speed_kph as f32),
             }
         } else if r#type.is_scroll_event() {
             Event::Scroll {
                 base,
                 scroll_delta: (self.scroll_delta_x as i32, self.scroll_delta_y as i32),
+                scroll_angle: if self.scroll_delta_x == 0 && self.scroll_delta_y == 0 {
+                    None
+                } else {
+                    Some(self.scroll_angle as f32)
+                },
+                scroll_speed_kph: safe_f32(self.drag_speed_kph as f32),
             }
         } else {
             return Err("Unhandled event type".into());
