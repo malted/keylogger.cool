@@ -30,6 +30,8 @@ pub struct ActionEventC {
     key_code: c_ushort,
     key_char: *const c_char,
     normalised_click_point: CGPointC,
+    mouse_distance_px: c_double,
+    mouse_distance_mm: c_double,
     scroll_delta_x: c_int,
     scroll_delta_y: c_int,
     dragged_distance_px: c_double,
@@ -37,6 +39,7 @@ pub struct ActionEventC {
     is_builtin_display: bool,
     is_main_display: bool,
     process_name: *const c_char,
+    keyboard_layout: *const c_char,
     function_start: TimespecC,
 }
 impl ActionEventC {
@@ -45,6 +48,9 @@ impl ActionEventC {
 
         let process_name_cstr = unsafe { CStr::from_ptr(self.process_name) };
         let process_name = String::from_utf8_lossy(process_name_cstr.to_bytes()).to_string();
+
+        let keyboard_layout_cstr = unsafe { CStr::from_ptr(self.keyboard_layout) };
+        let keyboard_layout = String::from_utf8_lossy(keyboard_layout_cstr.to_bytes()).to_string();
 
         // Get difference between now and function start
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?;
@@ -64,10 +70,6 @@ impl ActionEventC {
             }
         };
 
-        if self.time_down < 0 || self.time_down > u32::MAX as i64 {
-            return Err("time_down is out of range".into());
-        }
-
         let base = BaseEvent {
             r#type,
             is_builtin_display: self.is_builtin_display,
@@ -82,9 +84,10 @@ impl ActionEventC {
                 time_down_ms: self.time_down as u32,
                 key_code: self.key_code,
                 key_char,
+                keyboard_layout,
             }
-        } else if r#type.is_mouse_event() {
-            Event::Mouse {
+        } else if r#type.is_mouse_click_event() {
+            Event::MouseClick {
                 base,
                 time_down_ms: self.time_down as u32,
                 normalised_click_point: (
@@ -93,6 +96,12 @@ impl ActionEventC {
                 ),
                 dragged_distance_px: self.dragged_distance_px as u32,
                 dragged_distance_mm: self.dragged_distance_mm as u32,
+            }
+        } else if r#type.is_mouse_move_event() {
+            Event::MouseMove {
+                base,
+                distance_px: self.mouse_distance_mm as u32,
+                distance_mm: self.mouse_distance_mm as u32,
             }
         } else if r#type.is_scroll_event() {
             Event::Scroll {

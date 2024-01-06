@@ -38,17 +38,19 @@ impl EventType {
     pub fn is_keyboard_event(&self) -> bool {
         matches!(*self, Self::KeyDown | Self::KeyUp)
     }
-    pub fn is_mouse_event(&self) -> bool {
+    pub fn is_mouse_click_event(&self) -> bool {
         matches!(
             *self,
             Self::LeftMouseDown
                 | Self::LeftMouseUp
                 | Self::RightMouseDown
                 | Self::RightMouseUp
-                | Self::MouseMoved
                 | Self::LeftMouseDragged
                 | Self::RightMouseDragged
         )
+    }
+    pub fn is_mouse_move_event(&self) -> bool {
+        matches!(*self, Self::MouseMoved)
     }
     pub fn is_scroll_event(&self) -> bool {
         matches!(*self, Self::ScrollWheel)
@@ -64,20 +66,26 @@ pub struct BaseEvent {
     pub execution_time_us: i32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Event {
     Keyboard {
         base: BaseEvent,
         time_down_ms: u32,
         key_code: u16,
         key_char: String,
+        keyboard_layout: String,
     },
-    Mouse {
+    MouseClick {
         base: BaseEvent,
         time_down_ms: u32,
         normalised_click_point: (f32, f32),
         dragged_distance_px: u32,
         dragged_distance_mm: u32,
+    },
+    MouseMove {
+        base: BaseEvent,
+        distance_px: u32,
+        distance_mm: u32,
     },
     Scroll {
         base: BaseEvent,
