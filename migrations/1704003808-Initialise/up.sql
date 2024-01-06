@@ -18,7 +18,7 @@ CREATE TABLE keyboard_event (
 	FOREIGN KEY(process_id) REFERENCES process(id)
 );
 
-CREATE TABLE mouse_event (
+CREATE TABLE mouse_click_event (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	type INTEGER,
 	is_builtin_display INTEGER,
@@ -29,6 +29,20 @@ CREATE TABLE mouse_event (
 	time_down_ms INTEGER,
 	normalised_x REAL,
 	normalised_y REAL,
+	dragged_distance_px REAL,
+	dragged_distance_mm REAL,
+
+	FOREIGN KEY(process_id) REFERENCES process(id)
+);
+
+CREATE TABLE mouse_move_event (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	type INTEGER,
+	is_builtin_display INTEGER,
+	is_main_display INTEGER,
+	process_id INTEGER,
+	execution_time_us INTEGER,
+
 	dragged_distance_px REAL,
 	dragged_distance_mm REAL,
 
