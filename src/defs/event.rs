@@ -63,20 +63,18 @@ pub struct BaseEvent {
     pub is_builtin_display: bool,
     pub is_main_display: bool,
     pub process_name: String,
-    pub execution_time_us: i32,
+    pub start_time_us: u128,
 }
 
 #[derive(Debug, Clone)]
-pub enum Event {
+pub enum EventDetail {
     Keyboard {
-        base: BaseEvent,
         time_down_ms: u32,
         key_code: u16,
         key_char: String,
         keyboard_layout: String,
     },
     MouseClick {
-        base: BaseEvent,
         time_down_ms: u32,
         normalised_click_point: (f32, f32),
         dragged_distance_px: u32,
@@ -85,16 +83,20 @@ pub enum Event {
         drag_speed_kph: f32,
     },
     MouseMove {
-        base: BaseEvent,
         distance_px: u32,
         distance_mm: u32,
         mouse_angle: Option<f32>,
         mouse_speed_kph: f32,
     },
     Scroll {
-        base: BaseEvent,
         scroll_delta: (i32, i32),
         scroll_angle: Option<f32>,
         scroll_speed_kph: f32,
     },
+}
+
+#[derive(Debug, Clone)]
+pub struct Event {
+    pub base: BaseEvent,
+    pub detail: EventDetail,
 }

@@ -1,11 +1,12 @@
 #![feature(slice_split_once)]
 #![feature(str_split_remainder)]
 
+mod debug;
 mod defs;
 mod migrations;
 mod utils;
 // use chrono::Timelike;
-use defs::event::Event;
+use defs::event::{Event, EventDetail};
 
 use parking_lot::{Mutex, RwLock};
 use utils::init_databases;
@@ -26,55 +27,26 @@ pub fn handle_event(event: Event) {
 
     unsafe { STAGED_INPUTS.push(event.clone()) };
 
-    match event {
-        Event::Keyboard {
-            base,
-            keyboard_layout,
-            ..
+    debug::debug_event_callback(event.clone());
+
+    match event.detail {
+        EventDetail::Keyboard {
+            keyboard_layout, ..
         } => {
             if let Some(_last_process_name) = LAST_PROCESS_NAME.read().clone() {
-                println!("subsequent event; layout: {keyboard_layout}");
+                // Subsequent events
             } else {
                 // First event
-                println!("first event");
             }
             // if *STAGED_KEYPRESS_COUNT.read() >= MAX_STAGED_KEYPRESS_COUNT {
             //     let hour = chrono::Local::now().hour();
 
             //     *STAGED_KEYPRESS_COUNT.write() = 0;
             // }
-            LAST_PROCESS_NAME.write().replace(base.process_name);
+            LAST_PROCESS_NAME.write().replace(event.base.process_name);
         }
-        Event::MouseMove {
-            mouse_angle,
-            mouse_speed_kph,
-            ..
-        } => {
-            if let Some(mouse_angle_rad) = mouse_angle {
-                let mut angle_deg = mouse_angle_rad.to_degrees() + 90_f32;
-                angle_deg += 360_f32;
-                angle_deg %= 360_f32;
-                let dirs = ["⬆️", "↗️", "➡️", "↘️", "⬇️", "↙️", "⬅️", "↖️"];
-                let dir = dirs[(angle_deg / 45_f32) as usize];
-                let rounded_speed = (mouse_speed_kph * 10_f32).round() / 10_f32;
-                println!("Mouse: {dir} {rounded_speed:>5.1}km/h");
-            }
-        }
-        Event::Scroll {
-            scroll_angle,
-            scroll_speed_kph,
-            ..
-        } => {
-            if let Some(scroll_angle_rad) = scroll_angle {
-                let mut angle_deg = scroll_angle_rad.to_degrees() + 90_f32;
-                angle_deg += 360_f32;
-                angle_deg %= 360_f32;
-                let dirs = ["⬆️", "↗️", "➡️", "↘️", "⬇️", "↙️", "⬅️", "↖️"];
-                let dir = dirs[(angle_deg / 45_f32) as usize];
-                let rounded_speed = (scroll_speed_kph * 10_f32).round() / 10_f32;
-                println!("Scroll: {dir} {rounded_speed:>5.1}km/h");
-            }
-        }
+        EventDetail::MouseMove { .. } => {}
+        EventDetail::Scroll { .. } => {}
         _ => {}
     }
 
@@ -121,6 +93,13 @@ extern "C" {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_databases()?;
+
+    if cfg!(debug_assertions) {
+        std::thread::spawn(move || {
+            debug::start_term().unwrap();
+        });
+    }
+
     unsafe { registerTap() };
 
     println!("Rust is exiting.");

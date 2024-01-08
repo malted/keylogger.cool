@@ -62,8 +62,12 @@ CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
   // Get the process' name.
   int pid = CGEventGetIntegerValueField(event, kCGEventTargetUnixProcessID);
   char processName[255] = {0};
-  int ret = proc_name(pid, processName, sizeof(processName));
-  printf("Ret: %d, Process name: %s\n", ret, processName);
+  if (proc_name(pid, processName, sizeof(processName)) <= 0) {
+    printf("Couldn't get process name for pid: %d. This should not happen! "
+           "Please open an issue.\n",
+           pid);
+    exit(4227);
+  }
 
   // Click coords (global display space)
   CGPoint locationGlobal = CGEventGetLocation(event);
@@ -73,6 +77,7 @@ CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
   if (display == NULL) {
     printf("Couldn't find display for point x: %f, y: %f\n", locationGlobal.x,
            locationGlobal.y);
+    exit(4228);
     return event;
   }
 
@@ -241,13 +246,13 @@ void displayReconfigurationCallback(CGDirectDisplayID display,
   if (CGGetActiveDisplayList(DISPLAY_ARR_SIZE, displayIds, &displayCount) !=
       kCGErrorSuccess) {
     printf("Failed to get active display list\n");
+    exit(4229);
     return;
   }
   displaysInfo->displayCount = displayCount;
 
   // Free old memory if it was previously allocated
   if (displaysInfo->displays != NULL) {
-    printf("Freeing old displaysInfo->displays memory\n");
     free(displaysInfo->displays);
   }
   // For each display, get the bounds and the name.
@@ -255,6 +260,7 @@ void displayReconfigurationCallback(CGDirectDisplayID display,
   if (displaysInfo->displays == NULL) {
     // You had one job.
     printf("Failed to malloc displaysInfo->displays");
+    exit(4230);
     return;
   }
   for (unsigned int i = 0; i < displayCount; i++) {

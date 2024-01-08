@@ -1,5 +1,5 @@
 // use crate::defs::event::{Event, EventType};
-use super::event::{BaseEvent, Event, EventType};
+use super::event::{BaseEvent, Event, EventDetail, EventType};
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_double, c_int, c_long, c_ushort};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -59,11 +59,8 @@ impl ActionEventC {
         let keyboard_layout_cstr = unsafe { CStr::from_ptr(self.keyboard_layout) };
         let keyboard_layout = String::from_utf8_lossy(keyboard_layout_cstr.to_bytes()).to_string();
 
-        // Get difference between now and function start
-        let now = SystemTime::now().duration_since(UNIX_EPOCH)?;
-        let diff_sec_ex = now.as_secs() as i64 - self.function_start.tv_sec;
-        let diff_nsec_ex = now.subsec_nanos() as i64 - self.function_start.tv_nsec;
-        let diff_us = (diff_sec_ex * 1_000_000 + diff_nsec_ex / 1_000) as i32;
+        let start_us = (self.function_start.tv_sec as u128 * 1_000_000
+            + self.function_start.tv_nsec as u128 / 1_000) as u128;
 
         let key_char_cstr = unsafe { CStr::from_ptr(self.key_char) };
         let key_char = match std::str::from_utf8(key_char_cstr.to_bytes()) {
@@ -90,20 +87,18 @@ impl ActionEventC {
             is_builtin_display: self.is_builtin_display,
             is_main_display: self.is_main_display,
             process_name,
-            execution_time_us: diff_us,
+            start_time_us: start_us,
         };
 
-        let event: Event = if r#type.is_keyboard_event() {
-            Event::Keyboard {
-                base,
+        let detail: EventDetail = if r#type.is_keyboard_event() {
+            EventDetail::Keyboard {
                 time_down_ms: self.time_down as u32,
                 key_code: self.key_code,
                 key_char,
                 keyboard_layout,
             }
         } else if r#type.is_mouse_click_event() {
-            Event::MouseClick {
-                base,
+            EventDetail::MouseClick {
                 time_down_ms: self.time_down as u32,
                 normalised_click_point: (
                     safe_f32(self.normalised_click_point.x as f32),
@@ -119,8 +114,7 @@ impl ActionEventC {
                 drag_speed_kph: safe_f32(self.drag_speed_kph as f32),
             }
         } else if r#type.is_mouse_move_event() {
-            Event::MouseMove {
-                base,
+            EventDetail::MouseMove {
                 distance_px: self.mouse_distance_mm as u32,
                 distance_mm: self.mouse_distance_mm as u32,
                 mouse_angle: if self.mouse_distance_px == 0_f64 {
@@ -131,8 +125,7 @@ impl ActionEventC {
                 mouse_speed_kph: safe_f32(self.mouse_speed_kph as f32),
             }
         } else if r#type.is_scroll_event() {
-            Event::Scroll {
-                base,
+            EventDetail::Scroll {
                 scroll_delta: (self.scroll_delta_x as i32, self.scroll_delta_y as i32),
                 scroll_angle: if self.scroll_delta_x == 0 && self.scroll_delta_y == 0 {
                     None
@@ -145,6 +138,6 @@ impl ActionEventC {
             return Err("Unhandled event type".into());
         };
 
-        Ok(event)
+        Ok(Event { base, detail })
     }
 }

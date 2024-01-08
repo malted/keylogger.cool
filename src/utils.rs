@@ -1,5 +1,5 @@
 use super::migrations::run_pending_migrations;
-use crate::defs::event::Event;
+use crate::{debug, defs::event::Event};
 use rusqlite::Connection;
 
 pub fn init_databases() -> Result<(), Box<dyn std::error::Error>> {
@@ -61,6 +61,8 @@ pub fn _store_action_event(_event: &Event) -> Result<(), Box<dyn std::error::Err
     Ok(())
 }
 
+static mut PREVIOUS_EXECUTION_RANGE: Option<(u128, u128)> = None;
+
 #[no_mangle]
 pub unsafe extern "C" fn action_event_delegate(c_struct: *mut crate::defs::c::ActionEventC) {
     let ae = match (*c_struct).tidy_up() {
@@ -71,5 +73,19 @@ pub unsafe extern "C" fn action_event_delegate(c_struct: *mut crate::defs::c::Ac
         }
     };
 
-    crate::handle_event(ae);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("time went backwards");
+
+    if let Some(range) = PREVIOUS_EXECUTION_RANGE {
+        let diff_us = (range.1 - range.0) as u32;
+
+        if cfg!(debug_assertions) {
+            debug::LAST_EXECUTION_TIME_US.replace(diff_us);
+        }
+    }
+
+    crate::handle_event(ae.clone());
+
+    PREVIOUS_EXECUTION_RANGE = Some((ae.base.start_time_us, now.as_micros()));
 }
