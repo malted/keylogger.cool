@@ -16,6 +16,8 @@ CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
   struct timespec start;
   clock_gettime(CLOCK_REALTIME, &start);
 
+  (void)proxy;
+
   /* If you hold a key down, every time t (depending on your keyboard key
    * repetition configuation) macOS (quartz?) will insert a new key down
    * event, which we don't want to track. Luckily, there's a handy flag to
@@ -61,6 +63,7 @@ CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
   int pid = CGEventGetIntegerValueField(event, kCGEventTargetUnixProcessID);
   char processName[255] = {0};
   int ret = proc_name(pid, processName, sizeof(processName));
+  printf("Ret: %d, Process name: %s\n", ret, processName);
 
   // Click coords (global display space)
   CGPoint locationGlobal = CGEventGetLocation(event);
@@ -151,7 +154,7 @@ CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
       double mouseDeltaY =
           CGEventGetIntegerValueField(event, kCGMouseEventDeltaY);
 
-      mouseAngle = atan2(mouseDeltaX, mouseDeltaY);
+      mouseAngle = atan2(mouseDeltaY, mouseDeltaX);
 
       double mouseDistancePoints =
           round(sqrt(pow(mouseDeltaX, 2) + pow(mouseDeltaY, 2)));
@@ -161,11 +164,8 @@ CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
 
       if (passedInfo->pressed[keyCode].pressed->tv_sec != 0) {
         // km/h
-        long mouseSpeed = mouseDistanceMm /
-                          diffTimespec(passedInfo->pressed[keyCode].pressed) *
-                          3.6;
-
-        printf("mouseSpeed: %ld\n", mouseSpeed);
+        mouseSpeed = mouseDistanceMm /
+                     diffTimespec(passedInfo->pressed[keyCode].pressed) * 3.6;
       }
       clock_gettime(REALTIME_CLOCK, passedInfo->pressed[keyCode].pressed);
     }
@@ -232,12 +232,17 @@ struct Display *_Nullable manuallyGetDisplaysFromPoint(
 void displayReconfigurationCallback(CGDirectDisplayID display,
                                     CGDisplayChangeSummaryFlags flags,
                                     void *userInfo) {
+  (void)display, (void)flags;
+
   struct DisplaysInfo *displaysInfo = (struct DisplaysInfo *)userInfo;
 
   CGDirectDisplayID displayIds[DISPLAY_ARR_SIZE];
   uint32_t displayCount;
-  CGError result =
-      CGGetActiveDisplayList(DISPLAY_ARR_SIZE, displayIds, &displayCount);
+  if (CGGetActiveDisplayList(DISPLAY_ARR_SIZE, displayIds, &displayCount) !=
+      kCGErrorSuccess) {
+    printf("Failed to get active display list\n");
+    return;
+  }
   displaysInfo->displayCount = displayCount;
 
   // Free old memory if it was previously allocated
@@ -252,7 +257,7 @@ void displayReconfigurationCallback(CGDirectDisplayID display,
     printf("Failed to malloc displaysInfo->displays");
     return;
   }
-  for (int i = 0; i < displayCount; i++) {
+  for (unsigned int i = 0; i < displayCount; i++) {
     /* Get the actual resolution of the display in physical pixels. This is
      * useful because many display functions in CoreGraphics return values in
      * points, which are not necessarily equal to pixels, for example Quartz's

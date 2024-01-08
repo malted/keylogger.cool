@@ -14,6 +14,7 @@ int nl(char *str) {
 	tokenizer.string = testString;
 	__block NSInteger count = 0;
 	[tokenizer enumerateTokensInRange:NSMakeRange(0, testString.length) usingBlock:^(NSRange tokenRange, NLTokenizerAttributes attributes, BOOL *stop) {
+        (void)attributes, (void)stop;
 		NSLog(@"%@ %@", [testString substringWithRange:tokenRange], NSStringFromRange(tokenRange));
 		count++;
 	}];

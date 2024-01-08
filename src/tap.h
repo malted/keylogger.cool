@@ -14,7 +14,7 @@ struct ActionEvent {
   long timeDown;
   CGEventType type;
   unsigned short keyCode;
-  char *keyChar;
+  char *_Nonnull keyChar;
   CGPoint normalisedClickPoint;
   double mouseDistancePx;
   double mouseDistanceMm;
@@ -31,8 +31,8 @@ struct ActionEvent {
   bool isBuiltinDisplay;
   bool isMainDisplay;
   struct timespec functionStart;
-  char *keyboardLayout;
-  char *processName;
+  char *_Nonnull keyboardLayout;
+  char *_Nonnull processName;
 };
 
 struct Display {
@@ -44,29 +44,29 @@ struct Display {
 };
 
 struct DisplaysInfo {
-  struct Display *displays;
+  struct Display *_Nonnull displays;
   int displayCount;
 };
 
 struct PressedInfo {
   // The time when the key was pressed down.
-  struct timespec *pressed;
+  struct timespec *_Nonnull pressed;
 
   // Used to keep track of where the mouse was when it was clicked down.
   CGPoint clickPoint;
 };
 
 struct UserInfo {
-  struct PressedInfo *pressed;
-  struct DisplaysInfo *displaysInfo;
+  struct PressedInfo *_Nonnull pressed;
+  struct DisplaysInfo *_Nonnull displaysInfo;
 };
 
-extern void action_event_delegate(struct ActionEvent *c_struct);
+extern void action_event_delegate(struct ActionEvent *_Nonnull c_struct);
 
 struct Display *_Nullable manuallyGetDisplaysFromPoint(
-    struct DisplaysInfo *displayInfo, CGPoint point);
+    struct DisplaysInfo *_Nonnull displayInfo, CGPoint point);
 
-long diffTimespec(struct timespec *start);
+long diffTimespec(struct timespec *_Nonnull start);
 
 double pointsToPx(double points, struct Display display);
 double pointsToMm(double points, struct Display display);
@@ -79,4 +79,4 @@ bool eventTypeIsOtherMouse(CGEventType type);
 bool eventTypeIsScrollWheel(CGEventType type);
 bool eventTypeIsKeyboard(CGEventType type);
 
-char *keyCodeToChar(CGKeyCode keyCode);
+char *_Nonnull keyCodeToChar(CGKeyCode keyCode);

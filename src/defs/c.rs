@@ -50,7 +50,7 @@ pub struct ActionEventC {
 }
 impl ActionEventC {
     pub fn tidy_up(&self) -> Result<Event, Box<dyn std::error::Error>> {
-        println!("{:#?}", self);
+        // println!("{:#?}", self);
         let r#type = EventType::from_u32(self.r#type.0);
 
         let process_name_cstr = unsafe { CStr::from_ptr(self.process_name) };
@@ -128,7 +128,7 @@ impl ActionEventC {
                 } else {
                     Some(safe_f32(self.mouse_angle as f32))
                 },
-                mouse_speed_kph: safe_f32(self.drag_speed_kph as f32),
+                mouse_speed_kph: safe_f32(self.mouse_speed_kph as f32),
             }
         } else if r#type.is_scroll_event() {
             Event::Scroll {
@@ -139,7 +139,7 @@ impl ActionEventC {
                 } else {
                     Some(self.scroll_angle as f32)
                 },
-                scroll_speed_kph: safe_f32(self.drag_speed_kph as f32),
+                scroll_speed_kph: safe_f32(self.scroll_speed_kph as f32),
             }
         } else {
             return Err("Unhandled event type".into());

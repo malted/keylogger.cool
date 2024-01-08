@@ -1,8 +1,6 @@
 use super::migrations::run_pending_migrations;
-use crate::defs::event::{Event, EventType};
-use parking_lot::Mutex;
+use crate::defs::event::Event;
 use rusqlite::Connection;
-use std::{fs, io, path};
 
 pub fn init_databases() -> Result<(), Box<dyn std::error::Error>> {
     let aggregate_db_url = if cfg!(debug_assertions) {
@@ -20,7 +18,7 @@ pub fn init_databases() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-pub fn store_action_event(event: &Event) -> Result<(), Box<dyn std::error::Error>> {
+pub fn _store_action_event(_event: &Event) -> Result<(), Box<dyn std::error::Error>> {
     // let conn = db.lock();
     // let process_id: Option<i32> = conn
     //     .query_row(

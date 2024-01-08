@@ -1,5 +1,5 @@
-use crate::defs::migrations::{Migration, COMPILED_MIGRATION_FILENAME, DELIMITER, MIGRATIONS_PATH};
-use std::time::{SystemTime, UNIX_EPOCH};
+use crate::defs::migrations::{Migration, DELIMITER};
+// use std::time::{SystemTime, UNIX_EPOCH};
 
 const MIGRATIONS: &'static str = &include_str!(concat!(env!("OUT_DIR"), "/migrations.csv"));
 
