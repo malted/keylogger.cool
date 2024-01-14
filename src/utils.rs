@@ -3,10 +3,10 @@ use crate::{debug, defs::event::Event};
 use rusqlite::Connection;
 
 pub fn init_databases() -> Result<(), Box<dyn std::error::Error>> {
-    let aggregate_db_url = if cfg!(debug_assertions) {
-        "./aggregate-debug.sqlite3"
-    } else if cfg!(test) {
+    let aggregate_db_url = if cfg!(test) {
         ":memory:"
+    } else if cfg!(debug_assertions) {
+        "./aggregate-debug.sqlite3"
     } else {
         "~/.klcool/aggregate.sqlite3"
     };
