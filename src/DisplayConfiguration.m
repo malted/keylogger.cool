@@ -1,12 +1,6 @@
 #import "DisplayConfiguration.h"
-#import <AppKit/AppKit.h>
 #import <Foundation/Foundation.h>
 #import <NaturalLanguage/NaturalLanguage.h>
-
-int WrappedNSApplicationLoad(void) {
-    //NSLog(@"WrappedNSApplicationLoad called");
-    return NSApplicationLoad();
-}
 
 int nl(char *str) {
 	NLTokenizer *tokenizer = [[NLTokenizer alloc] initWithUnit:NLTokenUnitWord];

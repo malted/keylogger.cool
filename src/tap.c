@@ -311,7 +311,7 @@ void displayReconfigurationCallback(CGDirectDisplayID display,
   }
 }
 
-void registerTap(void) {
+int registerTap(void) {
   char *exampleSentence = "The quick brown fox jumps over the lazy dog.";
   nl(exampleSentence);
 
@@ -351,21 +351,23 @@ void registerTap(void) {
                                            &displaysInfo);
   if (!eventTap) {
     printf("Failed to create event tap\n");
-    return;
+    return 1;
   }
   runLoopSource =
       CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0);
   CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource,
                      kCFRunLoopCommonModes);
   CGEventTapEnable(eventTap, true);
-  bool successfulNSApplicationLoad = WrappedNSApplicationLoad();
-  if (!successfulNSApplicationLoad) {
-    printf("Failed to load NSApplication\n");
-    return;
-  }
+
   CFRunLoopRun();
   CGDisplayRemoveReconfigurationCallback(displayReconfigurationCallback,
                                          &displaysInfo);
+
+  // Free memory
+  free(displaysInfo.displays);
+  CFRelease(eventTap);
+  CFRelease(runLoopSource);
+  return 0;
 }
 
 // #region Utils
