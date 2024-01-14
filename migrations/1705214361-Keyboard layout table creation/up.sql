@@ -1,0 +1,4 @@
+CREATE TABLE keyboard_layout (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	name TEXT NOT NULL
+);
