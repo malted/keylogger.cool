@@ -108,3 +108,53 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     log::warn!("Rust is exiting.");
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    fn log_init() {
+        let _ = env_logger::builder().is_test(true).try_init();
+    }
+
+    #[test]
+    fn log_smoke() {
+        log_init();
+
+        log::info!("This record will be captured by `cargo test`");
+
+        assert_eq!(2, 1 + 1);
+    }
+
+    #[test]
+    fn db_init() {
+        log_init();
+
+        super::utils::init_databases().unwrap();
+    }
+
+    #[test]
+    fn tap_create() {
+        log_init();
+
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let tap_thread_running = std::sync::Arc::new(AtomicBool::new(true));
+
+        let start = std::time::Instant::now();
+
+        let thread_tap_thread_running = tap_thread_running.clone();
+        std::thread::spawn(move || {
+            unsafe { super::registerTap() };
+            thread_tap_thread_running.store(false, Ordering::Relaxed);
+        });
+
+        while tap_thread_running.load(Ordering::Relaxed) {
+            if start.elapsed().as_secs() > 5 {
+                panic!("Tap thread did not start in 5 seconds");
+            }
+        }
+
+        // Wait 5 seconds
+        // std::thread::sleep(std::time::Duration::from_secs(1));
+
+        assert!(tap_thread_running.load(Ordering::Relaxed));
+    }
+}
