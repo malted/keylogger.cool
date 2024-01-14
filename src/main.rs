@@ -119,7 +119,7 @@ mod tests {
     fn log_smoke() {
         log_init();
 
-        log::info!("This record will be captured by `cargo test`");
+        log::info!("Info log from `log_smoke` test");
 
         assert_eq!(2, 1 + 1);
     }
@@ -138,8 +138,6 @@ mod tests {
         use std::sync::atomic::{AtomicU8, Ordering};
         // 0 = not started, 1 = started, 2 = stopped
         let tap_thread_status = std::sync::Arc::new(AtomicU8::new(0));
-
-        let start = std::time::Instant::now();
 
         let thread_tap_thread_status = tap_thread_status.clone();
         std::thread::spawn(move || {
