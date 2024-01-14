@@ -1,3 +1,5 @@
+# ./scripts/new-migration.sh <name>
+
 if [ ! -f Cargo.toml ]
 then
 	echo "Aborted. You're in the wrong directory (no Cargo.toml found)"
