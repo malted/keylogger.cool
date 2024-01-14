@@ -135,26 +135,27 @@ mod tests {
     fn tap_create() {
         log_init();
 
-        use std::sync::atomic::{AtomicBool, Ordering};
-        let tap_thread_running = std::sync::Arc::new(AtomicBool::new(true));
+        use std::sync::atomic::{AtomicU8, Ordering};
+        // 0 = not started, 1 = started, 2 = stopped
+        let tap_thread_status = std::sync::Arc::new(AtomicU8::new(0));
 
         let start = std::time::Instant::now();
 
-        let thread_tap_thread_running = tap_thread_running.clone();
+        let thread_tap_thread_status = tap_thread_status.clone();
         std::thread::spawn(move || {
+            thread_tap_thread_status.store(1, Ordering::Relaxed);
             unsafe { super::registerTap() };
-            thread_tap_thread_running.store(false, Ordering::Relaxed);
+            thread_tap_thread_status.store(2, Ordering::Relaxed);
         });
 
-        while tap_thread_running.load(Ordering::Relaxed) {
-            if start.elapsed().as_secs() > 5 {
-                panic!("Tap thread did not start in 5 seconds");
-            }
+        // Wait for the thread to start
+        while tap_thread_status.load(Ordering::Relaxed) == 0 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
 
-        // Wait 5 seconds
-        // std::thread::sleep(std::time::Duration::from_secs(1));
+        // Wait for the tap registration to fail (if it does).
+        std::thread::sleep(std::time::Duration::from_millis(500));
 
-        assert!(tap_thread_running.load(Ordering::Relaxed));
+        assert_eq!(tap_thread_status.load(Ordering::Relaxed), 1);
     }
 }
