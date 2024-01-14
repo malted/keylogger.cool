@@ -11,12 +11,12 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  test:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v3
       - name: Build
-        run: cargo build --verbose
+        run: cargo test #-- --skip tap_create
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
