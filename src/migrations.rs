@@ -22,7 +22,7 @@ pub fn run_pending_migrations() -> Result<(), Box<dyn std::error::Error>> {
     migrations.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
 
     for migration in migrations {
-        println!("Running migration: {}", migration.name);
+        log::info!("Running migration: {}", migration.name);
 
         let conn = crate::DB_AGGREGATE.lock();
         let conn = conn.as_ref().expect("don't call this before db init!");

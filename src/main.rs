@@ -5,7 +5,6 @@ mod debug;
 mod defs;
 mod migrations;
 mod utils;
-// use chrono::Timelike;
 use defs::event::{Event, EventDetail};
 
 use parking_lot::{Mutex, RwLock};
@@ -27,6 +26,7 @@ pub fn handle_event(event: Event) {
 
     unsafe { STAGED_INPUTS.push(event.clone()) };
 
+    #[cfg(debug_assertions)]
     debug::debug_event_callback(event.clone());
 
     match event.detail {
@@ -45,7 +45,9 @@ pub fn handle_event(event: Event) {
             // }
             LAST_PROCESS_NAME.write().replace(event.base.process_name);
         }
-        EventDetail::MouseMove { .. } => {}
+        EventDetail::MouseMove { .. } => {
+            log::trace!("Mouse move");
+        }
         EventDetail::Scroll { .. } => {}
         _ => {}
     }
@@ -88,13 +90,14 @@ pub fn handle_event(event: Event) {
 }
 
 extern "C" {
-    fn registerTap();
+    fn registerTap() -> isize;
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::init();
     init_databases()?;
 
-    if cfg!(debug_assertions) {
+    if cfg!(debug_assertions) && std::env::args().any(|arg| arg == "--gui") {
         std::thread::spawn(move || {
             debug::start_term().unwrap();
         });
@@ -102,6 +105,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     unsafe { registerTap() };
 
-    println!("Rust is exiting.");
+    log::warn!("Rust is exiting.");
     Ok(())
 }

@@ -5,6 +5,8 @@ use rusqlite::Connection;
 pub fn init_databases() -> Result<(), Box<dyn std::error::Error>> {
     let aggregate_db_url = if cfg!(debug_assertions) {
         "./aggregate-debug.sqlite3"
+    } else if cfg!(test) {
+        ":memory:"
     } else {
         "~/.klcool/aggregate.sqlite3"
     };
@@ -68,7 +70,7 @@ pub unsafe extern "C" fn action_event_delegate(c_struct: *mut crate::defs::c::Ac
     let ae = match (*c_struct).tidy_up() {
         Ok(ae) => ae,
         Err(e) => {
-            println!("Error tidying up action event: {e}");
+            log::error!("Error tidying up action event: {e}");
             return;
         }
     };
@@ -88,4 +90,10 @@ pub unsafe extern "C" fn action_event_delegate(c_struct: *mut crate::defs::c::Ac
     crate::handle_event(ae.clone());
 
     PREVIOUS_EXECUTION_RANGE = Some((ae.base.start_time_us, now.as_micros()));
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn log_error(msg: *const std::os::raw::c_char) {
+    let msg = std::ffi::CStr::from_ptr(msg).to_str().unwrap();
+    log::error!("{msg}");
 }

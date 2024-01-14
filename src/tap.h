@@ -62,6 +62,7 @@ struct UserInfo {
 };
 
 extern void action_event_delegate(struct ActionEvent *_Nonnull c_struct);
+extern void log_error(char *_Nonnull message);
 
 struct Display *_Nullable manuallyGetDisplaysFromPoint(
     struct DisplaysInfo *_Nonnull displayInfo, CGPoint point);

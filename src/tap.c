@@ -350,7 +350,7 @@ int registerTap(void) {
   CGDisplayRegisterReconfigurationCallback(displayReconfigurationCallback,
                                            &displaysInfo);
   if (!eventTap) {
-    printf("Failed to create event tap\n");
+    log_error("Failed to create event tap");
     return 1;
   }
   runLoopSource =
@@ -363,10 +363,10 @@ int registerTap(void) {
   CGDisplayRemoveReconfigurationCallback(displayReconfigurationCallback,
                                          &displaysInfo);
 
-  // Free memory
   free(displaysInfo.displays);
   CFRelease(eventTap);
   CFRelease(runLoopSource);
+
   return 0;
 }
 

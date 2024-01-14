@@ -50,7 +50,6 @@ pub struct ActionEventC {
 }
 impl ActionEventC {
     pub fn tidy_up(&self) -> Result<Event, Box<dyn std::error::Error>> {
-        // println!("{:#?}", self);
         let r#type = EventType::from_u32(self.r#type.0);
 
         let process_name_cstr = unsafe { CStr::from_ptr(self.process_name) };
