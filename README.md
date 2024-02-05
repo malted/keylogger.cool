@@ -19,4 +19,4 @@ I will be running this tool for all of 2024 to get a year in review of my typing
 
 
 ### Documentation
-Every keypress is inserted into an in-memory staging database. Even though these are in order,
+All inputs are aggregated and sanitised before being written to disk.
