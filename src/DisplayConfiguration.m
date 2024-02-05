@@ -1,5 +1,6 @@
 #import "DisplayConfiguration.h"
 #import <Foundation/Foundation.h>
+#import <AppKit/AppKit.h>
 #import <NaturalLanguage/NaturalLanguage.h>
 
 int nl(char *str) {

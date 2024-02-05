@@ -1,6 +1,5 @@
 mod term;
 mod utils;
-pub use {term::start_term, utils::debug_event_callback};
 
 pub static mut MOUSE_DIR_EMOJI: Option<&str> = None;
 pub static mut MOUSE_SPEED: Option<f32> = None;

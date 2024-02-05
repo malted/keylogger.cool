@@ -1,93 +1,148 @@
 #![feature(slice_split_once)]
 #![feature(str_split_remainder)]
+#![feature(inline_const)]
 
 mod debug;
 mod defs;
 mod migrations;
 mod utils;
-use defs::event::{Event, EventDetail};
+use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering::SeqCst};
 
 use parking_lot::{Mutex, RwLock};
+use status_bar::{ns_alert, sync_infinite_event_loop, Menu, MenuItem, StatusItem};
+use std::sync::Arc;
 use utils::init_databases;
 
 pub static DB_AGGREGATE: Mutex<Option<rusqlite::Connection>> = Mutex::new(None);
 
-// static MAX_STAGED_KEYPRESS_COUNT: isize = 100; // Dev
-// static STAGED_KEYPRESS_COUNT: RwLock<isize> = RwLock::new(0);
+const MAX_STAGED_INPUT_COUNT: usize = 100; // Devel only
 
-static mut STAGED_INPUTS: Vec<Event> = Vec::new();
+static MOUSE_MOVE_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
 static LAST_PROCESS_NAME: RwLock<Option<String>> = RwLock::new(None);
 
-// Mouse move events stage
-// struct EventMMAgregateStage {}
+// pub fn handle_event(event: Event) {
+//     // if cfg!(debug_assertions) {
+//     //     debug::debug_event_callback(event.clone());
+//     // }
 
-pub fn handle_event(event: Event) {
-    // println!("{:?}", &event);
+//     match event.detail {
+//         EventDetail::Keyboard {
+//             keyboard_layout, ..
+//         } => {
+//             if let Some(_last_process_name) = LAST_PROCESS_NAME.read().clone() {
+//                 // Subsequent events
+//             } else {
+//                 // First event
+//             }
+//             // if *STAGED_KEYPRESS_COUNT.read() >= MAX_STAGED_KEYPRESS_COUNT {
+//             //     let hour = chrono::Local::now().hour();
 
-    unsafe { STAGED_INPUTS.push(event.clone()) };
+//             //     *STAGED_KEYPRESS_COUNT.write() = 0;
+//             // }
+//             LAST_PROCESS_NAME.write().replace(event.base.process_name);
+//         }
+//         EventDetail::MouseMove { .. } => {
+//             log::trace!("Mouse move");
+//             STAGED_MOUSE_MOVES.write()[MOUSE_MOVE_COUNTER.fetch_add(1, SeqCst)] = Some(event);
 
-    #[cfg(debug_assertions)]
-    debug::debug_event_callback(event.clone());
+//             if MOUSE_MOVE_COUNTER.load(SeqCst) >= MAX_STAGED_INPUT_COUNT {
+//                 log::debug!("Committing mouse move changes to db!");
 
-    match event.detail {
-        EventDetail::Keyboard {
-            keyboard_layout, ..
-        } => {
-            if let Some(_last_process_name) = LAST_PROCESS_NAME.read().clone() {
-                // Subsequent events
-            } else {
-                // First event
-            }
-            // if *STAGED_KEYPRESS_COUNT.read() >= MAX_STAGED_KEYPRESS_COUNT {
-            //     let hour = chrono::Local::now().hour();
+//                 let ts = std::time::SystemTime::now()
+//                     .duration_since(std::time::UNIX_EPOCH)
+//                     .unwrap()
+//                     .as_secs();
+//                 let ts = ts - (ts % 3600); // Round down to nearest hour.
 
-            //     *STAGED_KEYPRESS_COUNT.write() = 0;
-            // }
-            LAST_PROCESS_NAME.write().replace(event.base.process_name);
-        }
-        EventDetail::MouseMove { .. } => {
-            log::trace!("Mouse move");
-        }
-        EventDetail::Scroll { .. } => {}
-        _ => {}
-    }
+//                 let mut db = DB_AGGREGATE.lock();
+//                 let db = db.as_mut().unwrap();
 
-    // match store_action_event(&event) {
-    //     Ok(_) => (),
-    //     Err(e) => {
-    //         println!("Error storing action event: {}", e);
-    //         return;
-    //     }
-    // }
+//                 let tx = db.transaction().expect("failed to init transaction");
 
-    // if ae.key_code == 0 {
-    //     let count: i32 = DB_STAGING
-    //         .lock()
-    //         .query_row("SELECT count(*) FROM staged_inputs", [], |row| row.get(0))
-    //         .unwrap();
-    //     println!("count: {}", count);
+//                 let mut stmt = tx
+//                     .prepare(
+//                         "INSERT INTO mouse_move_event (
+// 							type,
+// 							is_builtin_display,
+// 							is_main_display,
+// 							process_id,
+// 							execution_time_us,
+// 							dragged_distance_px,
+// 							dragged_distance_mm,
+// 							datetime
+// 						) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+//                     )
+//                     .expect("failed to prepare statement");
 
-    //     // For each process, get the number of events
-    //     let mut process_counts: Vec<(String, i32)> = DB_STAGING
-    //         .lock()
-    //         .prepare(
-    //             "SELECT processes.name, count(*) FROM staged_inputs
-    //              INNER JOIN processes ON processes.id = staged_inputs.process_id
-    //              GROUP BY process_id",
-    //         )
-    //         .unwrap()
-    //         .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-    //         .unwrap()
-    //         .map(|r| r.unwrap())
-    //         .collect();
+//                 for event in STAGED_MOUSE_MOVES.read().iter().flatten() {
+//                     if let EventDetail::MouseMove {
+//                         distance_mm,
+//                         distance_px,
+//                         mouse_angle,
+//                         mouse_speed_kph,
+//                     } = event.detail
+//                     {
+//                         let process_id = 0;
 
-    //     process_counts.sort_by(|a, b| b.1.cmp(&a.1));
+//                         stmt.execute([
+//                             event.base.r#type as i32,
+//                             event.base.is_builtin_display as i32,
+//                             event.base.is_main_display as i32,
+//                             process_id,
+//                             event.base.start_time_us as i32,
+//                             distance_mm as i32,
+//                             distance_px as i32,
+//                             ts as i32,
+//                         ])
+//                         .expect("failed to execute statement");
+//                     } else {
+//                         panic!("foobar");
+//                     }
+//                 }
 
-    //     for (process_name, count) in process_counts {
-    //         println!("{}: {}", process_name, count);
-    //     }
-    // }
-}
+//                 MOUSE_MOVE_COUNTER.store(0, SeqCst);
+//             }
+//         }
+//         _ => {}
+//     }
+
+//     // match store_action_event(&event) {
+//     //     Ok(_) => (),
+//     //     Err(e) => {
+//     //         println!("Error storing action event: {}", e);
+//     //         return;
+//     //     }
+//     // }
+
+//     // if ae.key_code == 0 {
+//     //     let count: i32 = DB_STAGING
+//     //         .lock()
+//     //         .query_row("SELECT count(*) FROM staged_inputs", [], |row| row.get(0))
+//     //         .unwrap();
+//     //     println!("count: {}", count);
+
+//     //     // For each process, get the number of events
+//     //     let mut process_counts: Vec<(String, i32)> = DB_STAGING
+//     //         .lock()
+//     //         .prepare(
+//     //             "SELECT processes.name, count(*) FROM staged_inputs
+//     //              INNER JOIN processes ON processes.id = staged_inputs.process_id
+//     //              GROUP BY process_id",
+//     //         )
+//     //         .unwrap()
+//     //         .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+//     //         .unwrap()
+//     //         .map(|r| r.unwrap())
+//     //         .collect();
+
+//     //     process_counts.sort_by(|a, b| b.1.cmp(&a.1));
+
+//     //     for (process_name, count) in process_counts {
+//     //         println!("{}: {}", process_name, count);
+//     //     }
+//     // }
+// }
 
 extern "C" {
     fn registerTap() -> isize;
@@ -97,13 +152,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     init_databases()?;
 
-    if cfg!(debug_assertions) && std::env::args().any(|arg| arg == "--gui") {
-        std::thread::spawn(move || {
-            debug::start_term().unwrap();
-        });
-    }
+    std::thread::spawn(|| unsafe { registerTap() });
 
-    unsafe { registerTap() };
+    utils::init_statusbar();
+
+    // if std::env::args().any(|arg| arg == "--gui") {
+    //     std::thread::spawn(|| debug::start_term().unwrap());
+    // }
 
     log::warn!("Rust is exiting.");
     Ok(())

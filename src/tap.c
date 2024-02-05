@@ -8,7 +8,43 @@
 #include <mach/clock_types.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
+
+void updateActuationTime(struct CustomTapPayload *passedInfo, int keyCode) {
+  clock_gettime(REALTIME_CLOCK, &passedInfo->pressed[keyCode].pressed);
+}
+
+int isFirstEvent(struct CustomTapPayload *passedInfo, int keyCode) {
+  return passedInfo->pressed[keyCode].pressed.tv_nsec == 0;
+}
+
+void sendMouseMoveEvents(
+    struct MouseMoveEvent (*_Nonnull mouseMoveEvents)[STAGED_EVENTS_ARR_SIZE],
+    int *_Nonnull mouseMoveEventCount, struct timespec start,
+    char *_Nonnull lastEventProcessPath, char *_Nonnull processPath) {
+
+  char dbg_msg[64];
+  snprintf(dbg_msg, 64, "sending %d mouse moves", *mouseMoveEventCount);
+  log_debug(dbg_msg);
+
+  pass_mouse_move_events(mouseMoveEvents, *mouseMoveEventCount, start);
+  *mouseMoveEventCount = 0;
+  strcpy(lastEventProcessPath, processPath);
+}
+
+// These are global because the Rust delegate might want to request them
+// early.
+struct KeyboardEvent keyboardEvents[STAGED_EVENTS_ARR_SIZE];
+struct MouseClickEvent mouseClickEvents[STAGED_EVENTS_ARR_SIZE];
+struct MouseMoveEvent mouseMoveEvents[STAGED_EVENTS_ARR_SIZE];
+struct ScrollEvent scrollEvents[STAGED_EVENTS_ARR_SIZE];
+int keyboardEventCount = 0, mouseClickEventCount = 0, mouseMoveEventCount = 0,
+    scrollEventCount = 0;
+
+float initialMouseMoveAngleAtan2Offset;
+
+char lastEventProcessPath[PROC_PIDPATHINFO_MAXSIZE];
 
 CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
                             CGEventRef event, void *userInfo) {
@@ -16,29 +52,32 @@ CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
   struct timespec start;
   clock_gettime(CLOCK_REALTIME, &start);
 
-  (void)proxy;
+  (void)proxy; // I'm not using this.
 
-  /* If you hold a key down, every time t (depending on your keyboard key
-   * repetition configuation) macOS (quartz?) will insert a new key down
-   * event, which we don't want to track. Luckily, there's a handy flag to
-   * detect this! */
-  if (CGEventGetDoubleValueField(event, kCGKeyboardEventAutorepeat))
-    return event;
-
+  // If the event tap is disabled, we should exit.
   if (type == kCGEventTapDisabledByUserInput) {
     printf("Event tap disabled by user input\n");
-    exit(4225);
+    exit(ERR_TAP_DISABLED_USERINPUT);
   } else if (type == kCGEventTapDisabledByTimeout) {
     printf("Event tap disabled by timeout\n");
-    exit(4226);
+    exit(ERR_TAP_DISABLED_TIMEOUT);
   }
 
-  struct UserInfo *passedInfo = (struct UserInfo *)userInfo;
+  struct CustomTapPayload *_Nonnull passedInfo =
+      (struct CustomTapPayload *)userInfo;
 
-  CGKeyCode keyCode =
-      (CGKeyCode)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
+  CGPoint locationGlobal =
+      CGEventGetLocation(event); // Current mouse coords (global display space)
+  struct Display *display =
+      manuallyGetDisplaysFromPoint(passedInfo, locationGlobal);
+  if (display == NULL) {
+    printf("Couldn't find display for point x: %f, y: %f\n", locationGlobal.x,
+           locationGlobal.y);
+    exit(ERR_DISPLAY_NOTFOUND_FROM_POINT);
+    return event;
+  }
 
-  char layout[128];
+  char layout[KEYBOARD_LAYOUTNAME_MAXSIZE];
   memset(layout, '\0', sizeof(layout));
   TISInputSourceRef source = TISCopyCurrentKeyboardInputSource();
   // get input source id - kTISPropertyInputSourceID
@@ -47,180 +86,298 @@ CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
       TISGetInputSourceProperty(source, kTISPropertyInputSourceID);
   CFStringGetCString(layoutID, layout, sizeof(layout), kCFStringEncodingUTF8);
 
-  if (eventTypeIsLeftMouse(type)) {
-    keyCode = KEYCODE_MOUSE_LEFT;
-  } else if (eventTypeIsRightMouse(type)) {
-    keyCode = KEYCODE_MOUSE_RIGHT;
-  } else if (eventTypeIsOtherMouse(type)) {
-    keyCode = KEYCODE_MOUSE_OTHER;
-  } else if (eventTypeIsScrollWheel(type)) {
-    keyCode = KEYCODE_SCROLL_WHEEL;
-  } else if (eventTypeIsMouseMove(type)) {
-    keyCode = KEYCODE_MOUSE_MOVE;
-  }
-
-  // Get the process' name.
+  // Get the process' name & executable path.
   int pid = CGEventGetIntegerValueField(event, kCGEventTargetUnixProcessID);
-  char processName[255] = {0};
-  if (proc_name(pid, processName, sizeof(processName)) <= 0) {
-    printf("Couldn't get process name for pid: %d. This should not happen! "
-           "Please open an issue.\n",
-           pid);
-    exit(4227);
-  }
+  char processName[255];
+  char processPath[PROC_PIDPATHINFO_MAXSIZE];
+  proc_name(pid, processName, sizeof(processName));
+  proc_pidpath(pid, processPath, sizeof(processPath));
+  if (lastEventProcessPath[0] == '\0')
+    strcpy(lastEventProcessPath, processPath);
 
-  // Click coords (global display space)
-  CGPoint locationGlobal = CGEventGetLocation(event);
+  struct BaseEvent baseEvent = {
+      .type = type,
+      .isBuiltinDisplay = display->isBuiltin,
+      .isMainDisplay = display->isMain,
+      .processName = processName,
+      .processPath = processPath,
+  };
 
-  struct Display *display =
-      manuallyGetDisplaysFromPoint(passedInfo->displaysInfo, locationGlobal);
-  if (display == NULL) {
-    printf("Couldn't find display for point x: %f, y: %f\n", locationGlobal.x,
-           locationGlobal.y);
-    exit(4228);
+  if (eventTypeIsKeyboard(type)) {
+    if (mouseMoveEventCount > 1) {
+      sendMouseMoveEvents(&mouseMoveEvents, &mouseMoveEventCount, start,
+                          lastEventProcessPath, processPath);
+    }
+
+    // CGKeyCode keyCode =
+    //     (CGKeyCode)CGEventGetIntegerValueField(event,
+    //     kCGKeyboardEventKeycode);
+
+    // keyboardEvents[keyboardEventCount++] =
+    //     (struct KeyboardEvent){.baseEvent = baseEvent,
+    //                            .keyCode = keyCode,
+    //                            .keyChar = keyCodeToChar(keyCode),
+    //                            .keyboardLayout = layout,
+    //                            .repeated = CGEventGetDoubleValueField(
+    //                                event, kCGKeyboardEventAutorepeat)};
+
+    // if (keyboardEventCount > STAGED_EVENTS_ARR_SIZE) {
+    //   log_debug("SENDING KEYBOARD EVENTS TO RUST DELEGATE");
+    // }
+
     return event;
-  }
+  } else if (eventTypeIsMouseMove(type)) {
+    int mouseDeltaX = CGEventGetIntegerValueField(event, kCGMouseEventDeltaX);
+    int mouseDeltaY = CGEventGetIntegerValueField(event, kCGMouseEventDeltaY);
 
-  // Click coords (local display space)
-  CGPoint locationLocal = {0};
-  locationLocal.x = locationGlobal.x - display->bounds_points.origin.x;
-  locationLocal.y = locationGlobal.y - display->bounds_points.origin.y;
-
-  // TODO: Handle key down events here so we can exit early.
-
-  // Click coords, normalised (local display space)
-  CGPoint normalisedClickPoint = {0};
-  normalisedClickPoint.x = locationLocal.x / display->bounds_points.size.width;
-  normalisedClickPoint.y = locationLocal.y / display->bounds_points.size.height;
-
-  // If it's an input up event, sent the event.
-  // If it's anything else, record the time.
-  // For reference, see CGEventTypes.h L102.
-  if (type == kCGEventLeftMouseUp || type == kCGEventRightMouseUp ||
-      type == kCGEventKeyUp || type == kCGEventOtherMouseUp ||
-      type == kCGEventScrollWheel || type == kCGEventMouseMoved) {
-    char *keyChar = keyCodeToChar(keyCode);
-
-    int scrollDeltaX = 0, scrollDeltaY = 0;
-    double scrollAngle = 0, scrollSpeed = 0, dragDistancePx = 0,
-           dragDistanceMm = 0, dragAngle = 0, dragSpeed = 0,
-           mouseDistancePx = 0, mouseDistanceMm = 0, mouseAngle = 0,
-           mouseSpeed = 0;
-
-    if (eventTypeIsScrollWheel(type)) {
-      // https://developer.apple.com/documentation/coregraphics/cgeventfield/kcgscrollwheeleventpointdeltaaxis1
-      // https://gist.github.com/svoisen/5215826
-      scrollDeltaY = CGEventGetIntegerValueField(
-          event, kCGScrollWheelEventPointDeltaAxis1);
-      scrollDeltaX = CGEventGetIntegerValueField(
-          event, kCGScrollWheelEventPointDeltaAxis2);
-
-      double scrollDistancePoints =
-          round(sqrt(pow(scrollDeltaX, 2) + pow(scrollDeltaY, 2)));
-      double scrollDistanceMm = pointsToMm(scrollDistancePoints, *display);
-
-      scrollAngle = atan2(scrollDeltaY, scrollDeltaX);
-
-      if (passedInfo->pressed[keyCode].pressed->tv_sec != 0) {
-        // mm / ms
-        scrollSpeed = scrollDistanceMm /
-                      diffTimespec(passedInfo->pressed[keyCode].pressed);
-
-        // Convrt to km/h. This is so cursed.
-        scrollSpeed *= 3.6;
-      }
-      clock_gettime(REALTIME_CLOCK, passedInfo->pressed[keyCode].pressed);
-    } else if (eventTypeIsMouseClick(type)) {
-      // Calculate the distance between the click point and the release point,
-      // and round to nearest int
-      double dragDistanceX =
-          locationLocal.x - passedInfo->pressed[keyCode].clickPoint.x;
-      double dragDistanceY =
-          locationLocal.y - passedInfo->pressed[keyCode].clickPoint.y;
-
-      dragAngle = atan2(dragDistanceY, dragDistanceX);
-
-      double dragDistancePoints =
-          round(sqrt(pow(dragDistanceX, 2) + pow(dragDistanceY, 2)));
-
-      dragDistancePx = pointsToPx(dragDistancePoints, *display);
-      dragDistanceMm = pointsToMm(dragDistancePoints, *display);
-
-      if (passedInfo->pressed[keyCode].pressed->tv_sec != 0) {
-        // km/h
-        dragSpeed = dragDistanceMm /
-                    diffTimespec(passedInfo->pressed[keyCode].pressed) * 3.6;
-      }
-
-      clock_gettime(REALTIME_CLOCK, passedInfo->pressed[keyCode].pressed);
-    } else if (eventTypeIsMouseMove(type)) {
-      double mouseDeltaX =
-          CGEventGetIntegerValueField(event, kCGMouseEventDeltaX);
-      double mouseDeltaY =
-          CGEventGetIntegerValueField(event, kCGMouseEventDeltaY);
-
-      mouseAngle = atan2(mouseDeltaY, mouseDeltaX);
-
-      double mouseDistancePoints =
-          round(sqrt(pow(mouseDeltaX, 2) + pow(mouseDeltaY, 2)));
-
-      mouseDistancePx = pointsToPx(mouseDistancePoints, *display);
-      mouseDistanceMm = pointsToMm(mouseDistancePoints, *display);
-
-      if (passedInfo->pressed[keyCode].pressed->tv_sec != 0) {
-        // km/h
-        mouseSpeed = mouseDistanceMm /
-                     diffTimespec(passedInfo->pressed[keyCode].pressed) * 3.6;
-      }
-      clock_gettime(REALTIME_CLOCK, passedInfo->pressed[keyCode].pressed);
+    if (isFirstEvent(passedInfo, KEYCODE_MOUSE_MOVE)) {
+      log_debug("First event; skipping");
+      updateActuationTime(passedInfo, KEYCODE_MOUSE_MOVE);
+      strcpy(lastEventProcessPath, processPath);
+      return event;
     }
 
-    action_event_delegate(&(struct ActionEvent){
-        .timeDown = diffTimespec(passedInfo->pressed[keyCode].pressed),
-        .type = type,
-        .keyCode = keyCode,
-        .keyChar = keyChar,
-        .normalisedClickPoint = normalisedClickPoint,
-        .mouseDistancePx = mouseDistancePx,
-        .mouseDistanceMm = mouseDistanceMm,
-        .mouseAngle = mouseAngle,
-        .mouseSpeedKph = mouseSpeed,
-        .scrollDeltaX = scrollDeltaX,
-        .scrollDeltaY = scrollDeltaY,
-        .scrollAngle = scrollAngle,
-        .scrollSpeedKph = scrollSpeed,
-        .dragDistancePx = dragDistancePx,
-        .dragDistanceMm = dragDistanceMm,
-        .dragAngle = dragAngle,
-        .dragSpeedKph = dragSpeed,
-        .isBuiltinDisplay = display->isBuiltin,
-        .isMainDisplay = display->isMain,
-        .functionStart = start,
-        .keyboardLayout = layout,
-        .processName = processName,
-    });
+    double mouseDistancePoints =
+        round(sqrt(pow(mouseDeltaX, 2) + pow(mouseDeltaY, 2)));
+    float mouseDistanceMm = pointsToMm(mouseDistancePoints, *display);
 
-    free(keyChar);
-    CFRelease(source);
-  } else {
-    if (eventTypeIsKeyboard(type) || eventTypeIsMouseClick(type)) {
-      clock_gettime(CLOCK_REALTIME, passedInfo->pressed[keyCode].pressed);
+    long timeSinceLastActuation =
+        diffTimespec(&passedInfo->pressed[KEYCODE_MOUSE_MOVE].pressed);
+    updateActuationTime(passedInfo, KEYCODE_MOUSE_MOVE);
+    if (timeSinceLastActuation <= 0) {
+      strcpy(lastEventProcessPath, processPath);
+      return event;
     }
 
-    // If it's a mouse down event, record the local click point.
-    if (eventTypeIsMouseClick(type)) {
-      passedInfo->pressed[keyCode].clickPoint = locationLocal;
+    if (timeSinceLastActuation > 500 && mouseMoveEventCount > 1) {
+      sendMouseMoveEvents(&mouseMoveEvents, &mouseMoveEventCount, start,
+                          lastEventProcessPath, processPath);
+      return event;
+    }
+
+    float angle_diff = 0;
+    if (mouseDistancePoints >= 5.0) {
+      float velocityKph = mouseDistanceMm / timeSinceLastActuation * 3.6;
+
+      /* The atan2 function returns a value in the range of -π to π. (0 at (1,
+       * 0), boundary at (-1, 0)). Since I want an angular difference, without
+       * this jump, I'm rotating the delta coords by the angle of the first
+       * event, so the atan2 calculation always starts from (1, 0). This way,
+       * the angle will be continuous. The original values will be stored in the
+       * struct. I know it's usually atan2(y, x). Always using (x, y) here
+       * simplified the rotation logic. I just have to rotate (in reality
+       * offset and mod) to rectify it at the end. */
+
+      // angle_f = angle_f > 0 ? angle_f : 2 * M_PI + angle_f;
+      // int angle = fmod(angle_f * 180 / M_PI + 90, 360);
+      // initialMouseMoveAngleAtan2Offset
+
+      float raw_angle = atan2(mouseDeltaX, mouseDeltaY);
+      if (mouseMoveEventCount == 0) {
+        initialMouseMoveAngleAtan2Offset = raw_angle;
+      } else {
+        int rotatedMouseDeltaX =
+            mouseDeltaX * cos(initialMouseMoveAngleAtan2Offset) -
+            mouseDeltaY * sin(initialMouseMoveAngleAtan2Offset);
+        int rotatedMouseDeltaY =
+            mouseDeltaX * sin(initialMouseMoveAngleAtan2Offset) +
+            mouseDeltaY * cos(initialMouseMoveAngleAtan2Offset);
+        angle_diff = fabs(atan2(rotatedMouseDeltaX, rotatedMouseDeltaY));
+      }
+      char dbg_msg[64];
+      snprintf(dbg_msg, 64, "mousemov angles  raw: %f diff: %f init: %f",
+               raw_angle, angle_diff, initialMouseMoveAngleAtan2Offset);
+      log_trace(dbg_msg);
+
+      // printf("\t\t%d\t%d %d\t %ld\t%lf\t%lf\t%lf\n",
+      // (int)mouseDistancePoints,
+      //        mouseDeltaX, mouseDeltaY, timeSinceLastActuation,
+      //        mouseMoveEvents[0].angle, angle, angle_diff);
+
+      // printf("arst %d %d   %d %d\t%d %d %f\n", mouseDeltaX, mouseDeltaY,
+      //        rotatedMouseDeltaX, rotatedMouseDeltaY, angle,
+      //        mouseMoveEvents[0].angle, angle_diff);
+
+      mouseMoveEvents[mouseMoveEventCount++] = (struct MouseMoveEvent){
+          .baseEvent = baseEvent,
+          .distancePx = pointsToPx(mouseDistancePoints, *display),
+          .distanceMm = mouseDistanceMm,
+          .angle = 0,
+          .velocityKph = velocityKph};
+    }
+
+    // if (mouseMoveEventCount > STAGED_EVENTS_ARR_SIZE ||
+    //     ((angle_diff >= M_PI / 2 ||
+    //       !strcmp(processPath, lastEventProcessPath)) &&
+    //      mouseMoveEventCount > 1)) {
+    if ((mouseMoveEventCount > STAGED_EVENTS_ARR_SIZE ||
+         angle_diff >= M_PI / 2) &&
+        mouseMoveEventCount > 1) {
+      sendMouseMoveEvents(&mouseMoveEvents, &mouseMoveEventCount, start,
+                          lastEventProcessPath, processPath);
     }
   }
-
   return event;
+
+  // int keyCode;
+  // if (eventTypeIsLeftMouse(type)) {
+  //   keyCode = KEYCODE_MOUSE_LEFT;
+  // } else if (eventTypeIsRightMouse(type)) {
+  //   keyCode = KEYCODE_MOUSE_RIGHT;
+  // } else if (eventTypeIsOtherMouse(type)) {
+  //   keyCode = KEYCODE_MOUSE_OTHER;
+  // } else if (eventTypeIsScrollWheel(type)) {
+  //   keyCode = KEYCODE_SCROLL_WHEEL;
+  // } else if (eventTypeIsMouseMove(type)) {
+  //   keyCode = KEYCODE_MOUSE_MOVE;
+  // }
+
+  // // Click coords (local display space)
+  // CGPoint locationLocal = {0};
+  // locationLocal.x = locationGlobal.x - display->bounds_points.origin.x;
+  // locationLocal.y = locationGlobal.y - display->bounds_points.origin.y;
+
+  // // TODO: Handle key down events here so we can exit early.
+
+  // // Click coords, normalised (local display space)
+  // CGPoint normalisedClickPoint = {0};
+  // normalisedClickPoint.x = locationLocal.x /
+  // display->bounds_points.size.width; normalisedClickPoint.y = locationLocal.y
+  // / display->bounds_points.size.height;
+
+  // // If it's an input up event, sent the event.
+  // // If it's anything else, record the time.
+  // // For reference, see CGEventTypes.h L102.
+  // if (type == kCGEventLeftMouseUp || type == kCGEventRightMouseUp ||
+  //     type == kCGEventKeyUp || type == kCGEventOtherMouseUp ||
+  //     type == kCGEventScrollWheel || type == kCGEventMouseMoved) {
+  //   char *keyChar = keyCodeToChar(keyCode);
+
+  //   int scrollDeltaX = 0, scrollDeltaY = 0;
+  //   double scrollAngle = 0, scrollSpeed = 0, dragDistancePx = 0,
+  //          dragDistanceMm = 0, dragAngle = 0, dragSpeed = 0,
+  //          mouseDistancePx = 0, mouseDistanceMm = 0, mouseAngle = 0,
+  //          mouseSpeed = 0;
+
+  //   if (eventTypeIsScrollWheel(type)) {
+  //     //
+  //     https://developer.apple.com/documentation/coregraphics/cgeventfield/kcgscrollwheeleventpointdeltaaxis1
+  //     // https://gist.github.com/svoisen/5215826
+  //     scrollDeltaY = CGEventGetIntegerValueField(
+  //         event, kCGScrollWheelEventPointDeltaAxis1);
+  //     scrollDeltaX = CGEventGetIntegerValueField(
+  //         event, kCGScrollWheelEventPointDeltaAxis2);
+
+  //     double scrollDistancePoints =
+  //         round(sqrt(pow(scrollDeltaX, 2) + pow(scrollDeltaY, 2)));
+  //     double scrollDistanceMm = pointsToMm(scrollDistancePoints, *display);
+
+  //     scrollAngle = atan2(scrollDeltaY, scrollDeltaX);
+
+  //     if (passedInfo->pressed[keyCode].pressed.tv_sec != 0) {
+  //       // mm / ms
+  //       scrollSpeed = scrollDistanceMm /
+  //                     diffTimespec(&passedInfo->pressed[keyCode].pressed);
+
+  //       // Convrt to km/h. This is so cursed.
+  //       scrollSpeed *= 3.6;
+  //     }
+  //     updateActuationTime(passedInfo, keyCode);
+  //   } else if (eventTypeIsMouseClick(type)) {
+  //     // Calculate the distance between the click point and the release
+  //     point,
+  //     // and round to nearest int
+  //     double dragDistanceX =
+  //         locationLocal.x - passedInfo->pressed[keyCode].clickPoint.x;
+  //     double dragDistanceY =
+  //         locationLocal.y - passedInfo->pressed[keyCode].clickPoint.y;
+
+  //     dragAngle = atan2(dragDistanceY, dragDistanceX);
+
+  //     double dragDistancePoints =
+  //         round(sqrt(pow(dragDistanceX, 2) + pow(dragDistanceY, 2)));
+
+  //     dragDistancePx = pointsToPx(dragDistancePoints, *display);
+  //     dragDistanceMm = pointsToMm(dragDistancePoints, *display);
+
+  //     if (passedInfo->pressed[keyCode].pressed.tv_sec != 0) {
+  //       // km/h
+  //       dragSpeed = dragDistanceMm /
+  //                   diffTimespec(&passedInfo->pressed[keyCode].pressed)
+  //                   * 3.6;
+  //     }
+
+  //     updateActuationTime(passedInfo, keyCode);
+  //   } else if (eventTypeIsMouseMove(type)) {
+  //     double mouseDeltaX =
+  //         CGEventGetIntegerValueField(event, kCGMouseEventDeltaX);
+  //     double mouseDeltaY =
+  //         CGEventGetIntegerValueField(event, kCGMouseEventDeltaY);
+
+  //     mouseAngle = atan2(mouseDeltaY, mouseDeltaX);
+
+  //     double mouseDistancePoints =
+  //         round(sqrt(pow(mouseDeltaX, 2) + pow(mouseDeltaY, 2)));
+
+  //     mouseDistancePx = pointsToPx(mouseDistancePoints, *display);
+  //     mouseDistanceMm = pointsToMm(mouseDistancePoints, *display);
+
+  //     if (passedInfo->pressed[keyCode].pressed.tv_sec != 0) {
+  //       // km/h
+  //       mouseSpeed = mouseDistanceMm /
+  //                    diffTimespec(&passedInfo->pressed[keyCode].pressed)
+  //                    * 3.6;
+  //     }
+  //     updateActuationTime(passedInfo, keyCode);
+  //   }
+
+  // action_event_delegate(&(struct ActionEvent){
+  //     .timeDown = diffTimespec(&passedInfo->pressed[keyCode].pressed),
+  //     .type = type,
+  //     .keyCode = keyCode,
+  //     .keyChar = keyChar,
+  //     .normalisedClickPoint = normalisedClickPoint,
+  //     .mouseDistancePx = mouseDistancePx,
+  //     .mouseDistanceMm = mouseDistanceMm,
+  //     .mouseAngle = mouseAngle,
+  //     .mouseSpeedKph = mouseSpeed,
+  //     .scrollDeltaX = scrollDeltaX,
+  //     .scrollDeltaY = scrollDeltaY,
+  //     .scrollAngle = scrollAngle,
+  //     .scrollSpeedKph = scrollSpeed,
+  //     .dragDistancePx = dragDistancePx,
+  //     .dragDistanceMm = dragDistanceMm,
+  //     .dragAngle = dragAngle,
+  //     .dragSpeedKph = dragSpeed,
+  //     .isBuiltinDisplay = display->isBuiltin,
+  //     .isMainDisplay = display->isMain,
+  //     .functionStart = start,
+  //     .keyboardLayout = layout,
+  //     .processName = processName,
+  // });
+
+  // free(keyChar);
+  // CFRelease(source);
+  // }
+  // else {
+  //   if (eventTypeIsKeyboard(type) || eventTypeIsMouseClick(type)) {
+  //     updateActuationTime(passedInfo, keyCode);
+  //   }
+
+  //   // If it's a mouse down event, record the local click point.
+  //   if (eventTypeIsMouseClick(type)) {
+  //     passedInfo->pressed[keyCode].clickPoint = locationLocal;
+  //   }
+  // }
+
+  // return event;
 }
 
 // Faster than calling CGGetDisplaysWithPoint
 struct Display *_Nullable manuallyGetDisplaysFromPoint(
-    struct DisplaysInfo *displaysInfo, CGPoint point) {
-  struct Display *d = displaysInfo->displays;
-  for (int i = 0; i < displaysInfo->displayCount; i++) {
+    struct CustomTapPayload *_Nonnull customTapPayload, CGPoint point) {
+  struct Display *d = customTapPayload->displays;
+  for (int i = 0; i < customTapPayload->displayCount; i++) {
     // Not using CGRectContainsPoint! This is faster.
     if (point.x >= d[i].bounds_points.origin.x &&
         point.x <=
@@ -234,12 +391,13 @@ struct Display *_Nullable manuallyGetDisplaysFromPoint(
   return NULL; // Oops...
 }
 
-void displayReconfigurationCallback(CGDirectDisplayID display,
-                                    CGDisplayChangeSummaryFlags flags,
-                                    void *userInfo) {
+// void displayReconfigurationCallback(
+//     CGDirectDisplayID display, CGDisplayChangeSummaryFlags flags,
+//     struct CustomTapPayload *_Nonnull userInfo) {
+void displayReconfigurationCallback(unsigned int display, unsigned int flags,
+                                    void *_Nonnull userInfoRaw) {
   (void)display, (void)flags;
-
-  struct DisplaysInfo *displaysInfo = (struct DisplaysInfo *)userInfo;
+  struct CustomTapPayload *userInfo = (struct CustomTapPayload *)userInfoRaw;
 
   CGDirectDisplayID displayIds[DISPLAY_ARR_SIZE];
   uint32_t displayCount;
@@ -249,15 +407,15 @@ void displayReconfigurationCallback(CGDirectDisplayID display,
     exit(4229);
     return;
   }
-  displaysInfo->displayCount = displayCount;
+  userInfo->displayCount = displayCount;
 
   // Free old memory if it was previously allocated
-  if (displaysInfo->displays != NULL) {
-    free(displaysInfo->displays);
+  if (userInfo->displays != NULL) {
+    free(userInfo->displays);
   }
   // For each display, get the bounds and the name.
-  displaysInfo->displays = malloc(displayCount * sizeof(struct Display));
-  if (displaysInfo->displays == NULL) {
+  userInfo->displays = malloc(displayCount * sizeof(struct Display));
+  if (userInfo->displays == NULL) {
     // You had one job.
     printf("Failed to malloc displaysInfo->displays");
     exit(4230);
@@ -267,11 +425,11 @@ void displayReconfigurationCallback(CGDirectDisplayID display,
     /* Get the actual resolution of the display in physical pixels. This is
      * useful because many display functions in CoreGraphics return values in
      * points, which are not necessarily equal to pixels, for example Quartz's
-     * CGDisplayPixelsWide is somewhat of a misnomer, as it returns points, not
-     * pixels. Sure you could claim they are virtual pixels, but it's confusing
-     * regardless (& undocumented!). Native pixels are physical; for example
-     * my 13.6-inch M2 Air has a 2560-by-1664 native resolution, but in points
-     * is 1470-by-960. */
+     * CGDisplayPixelsWide is somewhat of a misnomer, as it returns points,
+     * not pixels. Sure you could claim they are virtual pixels, but it's
+     * confusing regardless (& undocumented!). Native pixels are physical; for
+     * example my 13.6-inch M2 Air has a 2560-by-1664 native resolution, but
+     * in points is 1470-by-960. */
     CGSize actual_px = {0};
     CFArrayRef allModes = CGDisplayCopyAllDisplayModes(displayIds[i], NULL);
     for (CFIndex i = 0; i < CFArrayGetCount(allModes); i++) {
@@ -286,8 +444,8 @@ void displayReconfigurationCallback(CGDirectDisplayID display,
       if (ioFlags & kDisplayModeNativeFlag) {
         /* In this case CGDisplayModeGetWidth and CGDisplayModeGetHeight would
          * still yield the correct result even though they are specified to
-         * return points, as the mode with kDisplayModeNativeFlag set has a 1:1
-         * point to pixel mapping. */
+         * return points, as the mode with kDisplayModeNativeFlag set has a
+         * 1:1 point to pixel mapping. */
         actual_px.width = CGDisplayModeGetPixelWidth(mode);
         actual_px.height = CGDisplayModeGetPixelHeight(mode);
         break;
@@ -301,7 +459,7 @@ void displayReconfigurationCallback(CGDirectDisplayID display,
       actual_px.height = CGDisplayPixelsHigh(displayIds[i]);
     }
 
-    displaysInfo->displays[i] = (struct Display){
+    userInfo->displays[i] = (struct Display){
         .bounds_points = CGDisplayBounds(displayIds[i]),
         .size_mm = CGDisplayScreenSize(displayIds[i]),
         .size_physical_px = actual_px,
@@ -318,18 +476,15 @@ int registerTap(void) {
   struct PressedInfo pressed[PRESSED_ARR_SIZE];
   for (int i = 0; i < PRESSED_ARR_SIZE; i++) {
     pressed[i] = (struct PressedInfo){
-        .pressed = &(struct timespec){0},
+        .pressed = (struct timespec){0},
         .clickPoint = (struct CGPoint){0},
     };
   }
 
-  struct DisplaysInfo displaysInfo = {
+  struct CustomTapPayload tapPayload = {
+      .pressed = pressed,
       .displays = NULL,
       .displayCount = 0,
-  };
-  struct UserInfo userInfo = {
-      .pressed = pressed,
-      .displaysInfo = &displaysInfo,
   };
 
   CFMachPortRef eventTap;
@@ -343,12 +498,12 @@ int registerTap(void) {
                (1 << kCGEventScrollWheel) | (1 << kCGEventMouseMoved));
 
   eventTap = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap, 0,
-                              eventMask, eventTapCallback, &userInfo);
+                              eventMask, eventTapCallback, &tapPayload);
 
   // Run the callback function to initialise displays array, then register it.
-  displayReconfigurationCallback(0, 0, &displaysInfo);
+  displayReconfigurationCallback(0, 0, &tapPayload);
   CGDisplayRegisterReconfigurationCallback(displayReconfigurationCallback,
-                                           &displaysInfo);
+                                           &tapPayload);
   if (!eventTap) {
     log_error("Failed to create event tap");
     return 1;
@@ -361,9 +516,9 @@ int registerTap(void) {
 
   CFRunLoopRun();
   CGDisplayRemoveReconfigurationCallback(displayReconfigurationCallback,
-                                         &displaysInfo);
+                                         &tapPayload);
 
-  free(displaysInfo.displays);
+  free(tapPayload.displays);
   CFRelease(eventTap);
   CFRelease(runLoopSource);
 

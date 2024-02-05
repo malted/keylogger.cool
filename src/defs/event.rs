@@ -63,40 +63,50 @@ pub struct BaseEvent {
     pub is_builtin_display: bool,
     pub is_main_display: bool,
     pub process_name: String,
-    pub start_time_us: u128,
+    pub process_path: String,
+    pub eventc_aggregate_count: Option<u8>,
 }
 
-#[derive(Debug, Clone)]
-pub enum EventDetail {
-    Keyboard {
-        time_down_ms: u32,
-        key_code: u16,
-        key_char: String,
-        keyboard_layout: String,
-    },
-    MouseClick {
-        time_down_ms: u32,
-        normalised_click_point: (f32, f32),
-        dragged_distance_px: u32,
-        dragged_distance_mm: u32,
-        drag_angle: Option<f32>,
-        drag_speed_kph: f32,
-    },
-    MouseMove {
-        distance_px: u32,
-        distance_mm: u32,
-        mouse_angle: Option<f32>,
-        mouse_speed_kph: f32,
-    },
-    Scroll {
-        scroll_delta: (i32, i32),
-        scroll_angle: Option<f32>,
-        scroll_speed_kph: f32,
-    },
-}
-
-#[derive(Debug, Clone)]
-pub struct Event {
+#[derive(Debug)]
+pub struct MouseMoveEvent {
     pub base: BaseEvent,
-    pub detail: EventDetail,
+    pub distance_px: u32,
+    pub distance_mm: f32,
+    pub angle: u16,
+    pub velocity_kph: f32,
 }
+
+// #[derive(Debug, Clone)]
+// pub enum EventDetail {
+//     Keyboard {
+//         time_down_ms: u32,
+//         key_code: u16,
+//         key_char: String,
+//         keyboard_layout: String,
+//     },
+//     MouseClick {
+//         time_down_ms: u32,
+//         normalised_click_point: (f32, f32),
+//         dragged_distance_px: u32,
+//         dragged_distance_mm: u32,
+//         drag_angle: Option<f32>,
+//         drag_speed_kph: f32,
+//     },
+//     MouseMove {
+//         distance_px: u32,
+//         distance_mm: u32,
+//         mouse_angle: Option<f32>,
+//         mouse_speed_kph: f32,
+//     },
+//     Scroll {
+//         scroll_delta: (i32, i32),
+//         scroll_angle: Option<f32>,
+//         scroll_speed_kph: f32,
+//     },
+// }
+
+// #[derive(Debug, Clone)]
+// pub struct Event {
+//     pub base: BaseEvent,
+//     pub detail: EventDetail,
+// }
