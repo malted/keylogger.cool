@@ -23,8 +23,8 @@ use objc2::{
 
 use icrate::{
     AppKit::{
-        NSAlert, NSApplication, NSColor, NSEvent, NSEventMaskAny, NSImage, NSMenu, NSMenuItem,
-        NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
+        NSAlert, NSApplication, NSEvent, NSEventMaskAny, NSImage, NSMenu, NSMenuItem, NSStatusBar,
+        NSStatusItem, NSVariableStatusItemLength,
     },
     Foundation::NSString,
 };
